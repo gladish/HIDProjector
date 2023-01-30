@@ -34,22 +34,68 @@ struct HIDRawMonitor {
   ssize_t report_size;
 };
 
-struct ConnectedClient {
-  int fd;
-  socklen_t remote_endpoint_size;
-  struct sockaddr_storage remote_endpoint;
+class ConnectedClient {
+public:
+  ConnectedClient() : m_fd(-1) { }
+
+  void set_connected(int fd) {
+    m_fd = fd;
+
+    memset(&m_remote_endpoint, 0, sizeof(m_remote_endpoint));
+    m_remote_endpoint_length = sizeof(m_remote_endpoint);
+    getpeername(m_fd, (struct sockaddr *) &m_remote_endpoint, &m_remote_endpoint_length);
+    // TODO: check length of m_remote_endpoint_length
+    m_remote_endpoint.ss_family = AF_INET;
+
+    XLOG_INFO("new client connection from%s", hipd_socketaddr_to_string(m_remote_endpoint)
+      .c_str());
+  }
+
+  ssize_t send_report(HIDRawMonitor *mon);
+  ssize_t send_create(HIDRawMonitor *mon);
+  ssize_t send_delete(HIDRawMonitor *mon);
+
+private:
+  ssize_t send_packet(int16_t id, const void *buff, ssize_t count, PacketType p, enum uhid_event_type t);
+
+private:
+  socklen_t m_remote_endpoint_length;
+  sockaddr_storage m_remote_endpoint;
+  int m_fd;
 };
 
 struct HIDMonitorServer
 {
+public:
+  HIDMonitorServer()
+    : listen_fd(-1)
+    , monitor_fd(-1)
+    , udev(nullptr)
+    , mon(nullptr)
+  {
+    memset(&listen_addr, 0, sizeof(listen_addr));
+    listen_addr_size = sizeof(listen_addr);
+  }
+
   int listen_fd;
   int monitor_fd;
-  ConnectedClient *client;
+  ConnectedClient client;
   struct sockaddr_storage listen_addr;
   socklen_t listen_addr_size;
   struct udev *udev;
   struct udev_monitor *mon;
   std::vector<HIDRawMonitor *> active_devices;
+public:
+  int do_accept() {
+    sockaddr_storage remote_addr;
+    socklen_t remote_addr_size = sizeof(sockaddr_storage);
+    int fd = accept(listen_fd, (struct sockaddr *) &remote_addr, &remote_addr_size);
+    if (fd == 1) {
+      XLOG_ERROR("failed to accept on listener socket. %s", strerror(errno));
+      return -1;
+    }
+    return fd;
+  }
 };
 
 static int16_t next_hidraw_monitor_id = 1001;
@@ -62,18 +108,6 @@ HIDRawMonitor    *hidraw_monitor_from_udev(struct udev_device *dev);
 std::vector<HIDRawMonitor*> hidraw_monitor_new(struct udev *dev);
 int               hidraw_monitor_read_report(HIDRawMonitor *hidrwaw);
 void              hidraw_monitor_free(HIDRawMonitor *hidraw);
-
-void              client_send_report(ConnectedClient *clnt, HIDRawMonitor *hidraw);
-void              client_send_create(ConnectedClient *clnt, HIDRawMonitor *hidraw);
-void              client_send_delete(ConnectedClient *clnt, HIDRawMonitor *hidraw);
-void              client_send_packet(
-                      ConnectedClient      *clnt,
-                      int16_t               id,
-                      const void           *buff,
-                      ssize_t               count,
-                      PacketType            packet_type,
-                      enum uhid_event_type  event_type);
-
 
 int main(int argc, char *argv[])
 {
@@ -102,8 +136,9 @@ int main(int argc, char *argv[])
     if (FD_ISSET(server->listen_fd, &read_fds))
       hid_monitor_server_accept(server);
 
-    if (FD_ISSET(server->monitor_fd, &read_fds))
+    if (FD_ISSET(server->monitor_fd, &read_fds)) {
       hid_monitor_server_create_or_delete(server);
+    }
 
     for (auto begin = std::begin(server->active_devices), end = std::end(server->active_devices);
       begin != end; ++begin)
@@ -111,16 +146,13 @@ int main(int argc, char *argv[])
       HIDRawMonitor *mon = *begin;
       if (FD_ISSET(mon->fd, &read_fds)) {
         int ret = hidraw_monitor_read_report(mon);
-        if (ret > 0)
-          client_send_report(server->client, mon);
+        if (ret > 0) {
+          server->client.send_report(mon);
+        }
         else {
-          client_send_delete(server->client, mon);
-
-          XLOG_INFO("removing active device 22 :%d", mon->device_id);
+          server->client.send_delete(mon);
           delete mon;
           begin = server->active_devices.erase(begin);
-          // server->locally_active_hid_devices = hidraw_monitor_free_node(
-          //  server->locally_active_hid_devices, mon);
           break;
         }
       }
@@ -130,11 +162,10 @@ int main(int argc, char *argv[])
   return 0;
 }
 
-void
-client_send_report(ConnectedClient *clnt, HIDRawMonitor *mon)
+ssize_t ConnectedClient::send_report(HIDRawMonitor *mon)
 {
-  if (!clnt)
-    return;
+  if (m_fd == -1)
+    return -ENOTCONN;
 
   int16_t packet_size = (int16_t) (10 + mon->report_size);
   int16_t packet_type = (int16_t) PacketTypeReport;
@@ -169,16 +200,24 @@ client_send_report(ConnectedClient *clnt, HIDRawMonitor *mon)
   printf("\n");
   #endif
 
-  ssize_t bytes_written = writev(clnt->fd, iov, 6);
-  if (bytes_written < 0)
-    XLOG_ERROR("writev:%s", strerror(errno));
-  // else
-  //  XLOG_INFO("writev:%d", (int) bytes_written);
+  ssize_t bytes_written = writev(m_fd, iov, 6);
+  if (bytes_written < 0) {
+    int err = errno;
+    XLOG_ERROR("writev:%s", strerror(err));
+    close(m_fd);
+    m_fd = -1;
+    return -err;
+  }
+
+  return bytes_written;
 }
 
-void
-client_send_packet(ConnectedClient *clnt, int16_t id, const void *buff, ssize_t count, PacketType p, enum uhid_event_type t)
+ssize_t
+ConnectedClient::send_packet(int16_t id, const void *buff, ssize_t count, PacketType p, enum uhid_event_type t)
 {
+  if (m_fd == -1)
+    return -ENOTCONN;
+
   // amount of data about to be sent
   // 2 bytes size of packet
   // 2 bytes device id
@@ -206,7 +245,16 @@ client_send_packet(ConnectedClient *clnt, int16_t id, const void *buff, ssize_t 
   iov[4].iov_base = (void *) buff;
   iov[4].iov_len = count;
 
-  ssize_t bytes_written = writev(clnt->fd, iov, 3);
+  ssize_t bytes_written = writev(m_fd, iov, 3);
+  if (bytes_written < 0) {
+    int err = errno;
+    XLOG_WARN("failed to write packet. %s", strerror(err));
+    close(m_fd);
+    m_fd = -1;
+    return -err;
+  }
+
+  return bytes_written;
 }
 
 HIDRawMonitor *hidraw_monitor_from_udev(struct udev_device *dev)
@@ -225,7 +273,7 @@ HIDRawMonitor *hidraw_monitor_from_udev(struct udev_device *dev)
 
   const char *dev_node = udev_device_get_devnode(mon->raw_dev);
 
-  mon->fd = open(dev_node, O_RDWR | O_CLOEXEC);
+  mon->fd = open(dev_node, O_RDWR);
   if (mon->fd == -1) {
     XLOG_ERROR("open(%s):%s", dev_node, strerror(errno));
     return nullptr;
@@ -284,14 +332,12 @@ int hidraw_monitor_read_report(HIDRawMonitor *hidraw)
   return n;
 }
 
-void client_send_create(ConnectedClient *clnt, HIDRawMonitor *mon)
+ssize_t ConnectedClient::send_create(HIDRawMonitor *mon)
 {
-  if (!clnt) {
-    XLOG_INFO("not sending create to NULL client");
-    return;
+  if (m_fd == -1) {
+    XLOG_INFO("can't send, not connected");
+    return -ENOTCONN;
   }
-
-  XLOG_INFO("sending create to client");
 
    // amount of data about to be sent
   // 2 bytes size of packet
@@ -336,17 +382,22 @@ void client_send_create(ConnectedClient *clnt, HIDRawMonitor *mon)
   iov[4].iov_base = &req;
   iov[4].iov_len = sizeof(req);
 
-  ssize_t bytes_written = writev(clnt->fd, iov, 5);
-  if (bytes_written < 0)
-    XLOG_ERROR("writev:%s", strerror(errno));
-  // else
-  //  XLOG_INFO("writev:%d", (int) bytes_written);
+  ssize_t bytes_written = writev(m_fd, iov, 5);
+  if (bytes_written < 0) {
+    int err = errno;
+    XLOG_ERROR("writev:%s", strerror(err));
+    close(m_fd);
+    m_fd = -1;
+    return -err;
+  }
+
+  return bytes_written;
 }
 
-void client_send_delete(ConnectedClient *clnt, HIDRawMonitor *mon)
+ssize_t ConnectedClient::send_delete(HIDRawMonitor *mon)
 {
-  if (!clnt)
-    return;
+  if (m_fd == -1)
+    return -ENOTCONN;
 
   HIDCommandPacketHeader pkt;
   pkt.packet_size = sizeof(HIDCommandPacketHeader);
@@ -365,11 +416,16 @@ void client_send_delete(ConnectedClient *clnt, HIDRawMonitor *mon)
   iov[3].iov_base = &pkt.event_type;
   iov[3].iov_len = sizeof(pkt.event_type);
 
-  ssize_t bytes_written = writev(clnt->fd, iov, 4);
+  ssize_t bytes_written = writev(m_fd, iov, 4);
   if (bytes_written < 0) {
     int err = errno;
     XLOG_WARN("error sending UHID_DESTROY. %s", strerror(err));
+    close(m_fd);
+    m_fd = -1;
+    return -err;
   }
+
+  return bytes_written;
 }
 
 void hidp_push_fd(fd_set *set, int fd, int *max)
@@ -465,7 +521,6 @@ std::vector<HIDRawMonitor *> hidraw_monitor_new(struct udev *udev)
 HIDMonitorServer *hid_monitor_server_new(const char *listen_addr, int listen_port)
 {
   HIDMonitorServer *server = new HIDMonitorServer();
-  memset(server, 0, sizeof(HIDMonitorServer));
 
   struct sockaddr_in *v4 = (struct sockaddr_in *) &server->listen_addr;
   memset(&server->listen_addr, 0, sizeof(&server->listen_addr));
@@ -519,30 +574,10 @@ HIDMonitorServer *hid_monitor_server_new(const char *listen_addr, int listen_por
 
 void hid_monitor_server_accept(HIDMonitorServer *server)
 {
-  if (server->client) {
-    if (server->client->fd != -1)
-      close(server->client->fd);
-  }
-  else {
-    server->client = new ConnectedClient();
-    memset(server->client, 0, sizeof(server->client));
-    server->client->fd = -1;
-    server->client->remote_endpoint_size = sizeof(struct sockaddr_in);
-  }
-
-  server->client->fd = accept(server->listen_fd, (struct sockaddr *) &server->client->remote_endpoint,
-    &server->client->remote_endpoint_size);
-  if (server->client->fd  == -1) {
-    XLOG_WARN("error accepting new client connection. %s", strerror(errno));
-    return;
-  }
-  server->client->remote_endpoint.ss_family = AF_INET; // TODO v6
-
-  XLOG_INFO("accepted new connection from %s", hipd_socketaddr_to_string(
-    server->client->remote_endpoint).c_str());
-
+  int fd = server->do_accept();
+  server->client.set_connected(fd);
   for (HIDRawMonitor *mon : server->active_devices)
-    client_send_create(server->client, mon);
+    server->client.send_create(mon);
 }
 
 void hid_monitor_server_create_or_delete(HIDMonitorServer *server)
@@ -563,7 +598,7 @@ void hid_monitor_server_create_or_delete(HIDMonitorServer *server)
     XLOG_INFO("add:%s", udev_device_get_devnode(dev));
     HIDRawMonitor *mon = hidraw_monitor_from_udev(dev);
     server->active_devices.push_back(mon);
-    client_send_create(server->client, mon);
+    server->client.send_create(mon);
   }
   else if (strcasecmp(action, "remove") == 0) {
     XLOG_INFO("remove:%s", udev_device_get_devnode(dev));
@@ -573,22 +608,22 @@ void hid_monitor_server_create_or_delete(HIDMonitorServer *server)
       HIDRawMonitor *mon = *begin;
       const char *devnode = udev_device_get_devnode(mon->raw_dev);
       if (strcmp(devnode, udev_device_get_devnode(dev)) == 0) {
-        client_send_delete(server->client, mon);
-
+        server->client.send_delete(mon);
         XLOG_INFO("removing active device 33:%d", (int) mon->device_id);
         begin = server->active_devices.erase(begin);
         break;
       }
     }
   }
-
   udev_device_unref(dev);
 }
 
 void hidraw_monitor_free(HIDRawMonitor *hidraw)
 {
+  /*
   if (hidraw->raw_dev)
     udev_device_unref(hidraw->raw_dev);
+  */
 
   if (hidraw->fd > 0)
     close(hidraw->fd);
