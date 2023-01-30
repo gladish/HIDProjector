@@ -1,8 +1,11 @@
 #include "hidp.h"
 
+#include <errno.h>
 #include <stdarg.h>
 #include <stdlib.h>
+#include <string.h>
 #include <stdio.h>
+#include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
 
@@ -110,4 +113,38 @@ const char *udev_bustype_to_string(unsigned bus_type)
       return "unknown";
   }
   return s;
+}
+
+void hid_command_packet_header_from_network(HIDCommandPacketHeader *pkt)
+{
+  pkt->packet_size = le16toh(pkt->packet_size);
+  pkt->device_id = le16toh(pkt->device_id);
+  pkt->packet_type = le16toh(pkt->packet_type);
+  pkt->event_type = le16toh(pkt->event_type);
+}
+
+void hid_command_packet_header_to_network(HIDCommandPacketHeader *pkt)
+{
+  pkt->packet_size = htole16(pkt->packet_size);
+  pkt->device_id = htole16(pkt->device_id);
+  pkt->packet_type = htole16(pkt->packet_type);
+  pkt->event_type = htole16(pkt->event_type);
+}
+
+
+int hidp_read_until(int fd, void *buff, int count)
+{
+  ssize_t bytes_read = 0;
+  ssize_t bytes_to_read = count;
+  while (bytes_read < bytes_to_read) {
+    ssize_t n = recv(fd, buff + bytes_read, (bytes_to_read - bytes_read), MSG_NOSIGNAL);
+    if (n == 0)
+      return -ENOTCONN;
+    if (n == -1) {
+      int err = errno;
+      XLOG_WARN("recv:%s", strerror(errno));
+      return -err;
+    }
+    bytes_read += n;
+  }
 }
