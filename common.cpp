@@ -9,6 +9,7 @@
 #include <sys/socket.h>
 #include <sys/time.h>
 #include <unistd.h>
+#include <arpa/inet.h>
 
 #include <linux/input.h>
 
@@ -148,4 +149,26 @@ int hidp_read_until(int fd, void *buff, int count)
     bytes_read += n;
   }
   return bytes_read;
+}
+
+std::string  hipd_socketaddr_to_string(sockaddr_storage &ss)
+{
+  char buff[64];
+  memset(buff, 0, sizeof(buff));
+
+  if (ss.ss_family == AF_INET)
+  {
+    struct sockaddr_in* v4 = (struct sockaddr_in *) &ss;
+    void* addr = &v4->sin_addr;
+    int family = AF_INET;
+
+    //if (port)
+    //  *port = ntohs(v4->sin_port);
+    family = AF_INET;
+
+    if (addr)
+      inet_ntop(family, addr, buff, sizeof(buff));
+  }
+
+  return std::string(buff);
 }
