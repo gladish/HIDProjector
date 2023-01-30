@@ -21,6 +21,12 @@ enum _xLogLevel
   XLOG_LEVEL_FATAL = 5
 };
 
+typedef enum _PacketType PacketType;
+enum _PacketType {
+  PacketTypeCreate = 0x01,
+  PacketTypeDelete = 0x02,
+  PacketTypeReport = 0x03
+};
 
 typedef struct _HIDCommandPacketHeader HIDCommandPacketHeader;
 struct _HIDCommandPacketHeader

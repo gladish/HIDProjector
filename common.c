@@ -65,7 +65,6 @@ void hidp_udev_device_dump(struct udev_device *dev)
 {
   if (!dev)
     return;
-  XLOG_INFO(" ---  begin new device --- ");
   XLOG_INFO("devpath     : %s", udev_device_get_devpath(dev));
   XLOG_INFO("subsystem   : %s", udev_device_get_subsystem(dev));
   XLOG_INFO("devtype     : %s", udev_device_get_devtype(dev));
@@ -93,7 +92,6 @@ void hidp_udev_device_dump(struct udev_device *dev)
   XLOG_INFO("serial      : %s", serial_number_utf8);
   XLOG_INFO("product     : %s", product_name_utf8);
   #endif
-  XLOG_INFO(" --- end new device -- ");
 }
 
 const char *udev_bustype_to_string(unsigned bus_type)
