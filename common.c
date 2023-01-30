@@ -145,4 +145,5 @@ int hidp_read_until(int fd, void *buff, int count)
     }
     bytes_read += n;
   }
+  return bytes_read;
 }
