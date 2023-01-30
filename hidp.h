@@ -10,8 +10,7 @@
 #define XLOG_ERROR(FORMAT, ...) hidp_log_printf(XLOG_LEVEL_ERROR, FORMAT, ## __VA_ARGS__)
 #define XLOG_FATAL(FORMAT, ...) hidp_log_printf(XLOG_LEVEL_FATAL, FORMAT, ## __VA_ARGS__)
 
-typedef enum _xLogLevel xLogLevel;
-enum _xLogLevel
+enum xLogLevel
 {
   XLOG_LEVEL_NONE  = 0,
   XLOG_LEVEL_DEBUG = 1,
@@ -21,15 +20,13 @@ enum _xLogLevel
   XLOG_LEVEL_FATAL = 5
 };
 
-typedef enum _PacketType PacketType;
-enum _PacketType {
+enum PacketType {
   PacketTypeCreate = 0x01,
   PacketTypeDelete = 0x02,
   PacketTypeReport = 0x03
 };
 
-typedef struct _HIDCommandPacketHeader HIDCommandPacketHeader;
-struct _HIDCommandPacketHeader
+struct HIDCommandPacketHeader
 {
   int16_t packet_size;
   int16_t device_id;
