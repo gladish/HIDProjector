@@ -131,7 +131,6 @@ void hid_command_packet_header_to_network(HIDCommandPacketHeader *pkt)
   pkt->event_type = htole16(pkt->event_type);
 }
 
-
 int hidp_read_until(int fd, void *buff, int count)
 {
   ssize_t bytes_read = 0;

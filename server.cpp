@@ -144,13 +144,16 @@ public:
     iov[0].iov_base = &header;
     iov[0].iov_len = sizeof(header);
     iov[1].iov_base = &res;
-    iov[1].iov_len = 10 + n;
+    iov[1].iov_len = 8 + n;
 
     ssize_t bytes_written = writev(client.fd(), iov, 2);
     if (bytes_written < 0) {
       int err = errno;
       XLOG_WARN("failed to write get_report reply. %s", strerror(err));
       return;
+    }
+    else {
+      XLOG_INFO("bytes_written:%d", bytes_written);
     }
   }
 
@@ -431,9 +434,6 @@ ssize_t ConnectedClient::send_create(HIDRawMonitor *mon)
   int16_t packet_size = (int16_t) (8 + sizeof(struct uhid_create2_req));
   int16_t packet_type = (int16_t) (PacketTypeCreate);
   int16_t event_type = (int16_t) UHID_CREATE2;
-
-  XLOG_INFO("packet_size:%d", packet_size);
-  XLOG_INFO("sizeof(uhid_create2_req):%d", (int) sizeof(struct uhid_create2_req));
 
   packet_size = htole16(packet_size);
   packet_type = htole16(packet_type);
