@@ -1,3 +1,5 @@
+
+#include <assert.h>
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -51,7 +53,7 @@ private:
   int m_uhid_fd;
 };
 
-struct HIDMonitorClient {
+class HIDMonitorClient {
 public:
   HIDMonitorClient(const char *server_addr, int server_port) {
     m_sock = socket(AF_INET, SOCK_STREAM, 0);
@@ -90,7 +92,6 @@ public:
 
   void add_vhid(int16_t channel_id) {
     VirtualHID *vhid = new VirtualHID(channel_id);
-    XLOG_INFO("adding new VHID with device id:%d", channel_id);
 
     const struct uhid_create2_req *req = data<const struct uhid_create2_req *>();
     struct uhid_event e;
@@ -195,6 +196,7 @@ public:
 
     HIDCommandPacketHeader *header = this->header();
     hid_command_packet_header_from_network(header);
+    assert(header->packet_size > 0);
 
     // read remainder of packet
     bytes_read = hidp_read_until(m_sock, &m_read_buffer[sizeof_header], (header->packet_size - sizeof_header));
@@ -207,13 +209,14 @@ public:
   }
 
   void push_vhid_fds(fd_set *set, int *max_fd) {
-    for  (VirtualHID *vhid : m_vhids) {
+    for (VirtualHID *vhid : m_vhids) {
       hidp_push_fd(set, vhid->uhid_fd(), max_fd);
     }
   }
 
   void check_vhid_fds(fd_set *set, int server_fd) {
     for (VirtualHID *vhid : m_vhids) {
+      int fd = vhid->uhid_fd();
       if (FD_ISSET(vhid->uhid_fd(), set)) {
         // TODO: kernel is asking for report, fwd to server
         struct uhid_event e = {};
