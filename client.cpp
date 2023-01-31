@@ -23,8 +23,12 @@ public:
   VirtualHID(int16_t channel_id)
     : m_channel_id(channel_id) {
     m_uhid_fd = open("/dev/uhid", O_RDWR | O_CLOEXEC);
+    XLOG_INFO("created new VHID device with fd:%d device_id:%d", m_uhid_fd,
+      channel_id);
   } 
   ~VirtualHID() {
+    XLOG_INFO("deleting VHID device with fd:%d device_id:%d", m_uhid_fd,
+      m_channel_id);
     if (m_uhid_fd > 0)
       close(m_uhid_fd);
   }
@@ -85,6 +89,7 @@ public:
 
   void add_vhid(int16_t channel_id) {
     VirtualHID *vhid = new VirtualHID(channel_id);
+    XLOG_INFO("adding new VHID with device id:%d", channel_id);
 
     const struct uhid_create2_req *req = data<const struct uhid_create2_req *>();
     struct uhid_event e;
@@ -96,12 +101,12 @@ public:
       int err = errno;
       XLOG_INFO("failed to write UHID_CREATE2. %s", strerror(err));
     }
-
+    XLOG_INFO("VHID for '%s' created sucessfully", e.u.create2.name);
     m_vhids.push_back(vhid);
-
   }
 
   void remove_vhid(int16_t channel_id) {
+    XLOG_INFO("removing VHID with id:%d", channel_id);
     auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&channel_id](const VirtualHID *item) {
         return item->channel_id() == channel_id;
       });
@@ -121,6 +126,7 @@ public:
     }
     delete vhid;
     m_vhids.erase(itr);
+    XLOG_INFO("VHID removed");
   }
 
   void submit_report(int16_t channel_id) {
@@ -188,6 +194,11 @@ public:
         ssize_t bytes_read = read(vhid->uhid_fd(), &e, sizeof(e));
         XLOG_INFO("read from kernel:%d", (int) bytes_read);
         XLOG_INFO("type:%d", e.type);
+        if  (e.type == UHID_GET_REPORT) {
+          XLOG_INFO("id      :%d", e.u.get_report.id);
+          XLOG_INFO("rnum    :%d", e.u.get_report.rnum);
+          XLOG_INFO("rtype   :%d", e.u.get_report.rtype);
+        }
       }
     }
   }
@@ -244,49 +255,3 @@ int main(int argc, char *argv[])
 
   return 0;
 }
-
-#if 0
-HIDMonitorClient *hid_monitor_client_new(const char *remote_addr, int remote_port)
-{
-  HIDMonitorClient *client = new HIDMonitorClient();
-  memset(client, 0, sizeof(HIDMonitorClient));
-
-  struct sockaddr_in *v4 = (struct sockaddr_in *) &client->remote_endpoint;
-
-  int ret = inet_pton(AF_INET, remote_addr, &v4->sin_addr);
-  if (ret == -1)
-    XLOG_FATAL("inet_pton:%s", strerror(errno));
-
-  v4->sin_port = htons(remote_port);
-  v4->sin_family = AF_INET;
-  client->remote_endpoint_size = sizeof(struct sockaddr_in);
-
-  ret = connect(client->server_fd, (const struct sockaddr *) &client->remote_endpoint, client->remote_endpoint_size);
-  if (ret == -1)
-    XLOG_FATAL("connect:%s", strerror(errno));
-
-  return client;
-}
-
-void hid_monitor_client_create(HIDMonitorClient *clnt)
-{
-  XLOG_INFO("creating new VHID");
-
-  HIDCommandPacketHeader *header = HID_COMMAND_HEADER(clnt);
-
-  struct uhid_create2_req *req = (struct uhid_create2_req *) HID_COMMAND_PACKET(clnt);
-  struct uhid_event e;
-  e.type = UHID_CREATE2;
-  e.u.create2 = *req;
-
-  VirtualHID *vhid = clnt->new_vhid(header->channel_id);
-
-  ssize_t bytes_written = write(vhid->uhid_fd(), &e, sizeof(e));
-  if (bytes_written == -1) {
-    XLOG_ERROR("create new VHID failed to write to uhid device. %s", strerror(errno));
-    return;
-  }
-
-  XLOG_INFO("created new VHID for %s", e.u.create2.name);
-}
-#endif
