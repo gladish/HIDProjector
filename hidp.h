@@ -2,7 +2,6 @@
 #pragma once
 
 #include <sys/select.h>
-#include <libudev.h>
 #include <string>
 #include <sys/socket.h>
 
@@ -45,6 +44,5 @@ void hid_command_packet_header_to_network(HIDCommandPacketHeader *header);
 void         hidp_log_printf(xLogLevel level, const char *format, ...);
 const char  *hidp_bus_to_string(int bus);
 void         hidp_push_fd(fd_set *set, int fd, int *max);
-void         hidp_udev_device_dump(struct udev_device *dev);
 int          hidp_read_until(int fd, void *buff, int count);
 std::string  hipd_socketaddr_to_string(sockaddr_storage &ss);

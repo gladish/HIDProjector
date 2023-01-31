@@ -24,6 +24,8 @@
 #include <algorithm>
 #include <vector>
 
+static void hidp_udev_device_dump(struct udev_device *dev);
+
 struct HIDRawMonitor {
   struct hidraw_report_descriptor desc;
   struct hidraw_devinfo info;
@@ -704,4 +706,37 @@ void hidraw_monitor_free(HIDRawMonitor *hidraw)
     close(hidraw->fd);
 
   free(hidraw);
+}
+
+void hidp_udev_device_dump(struct udev_device *dev)
+{
+  if (!dev)
+    return;
+  XLOG_INFO("devpath     : %s", udev_device_get_devpath(dev));
+  XLOG_INFO("subsystem   : %s", udev_device_get_subsystem(dev));
+  XLOG_INFO("devtype     : %s", udev_device_get_devtype(dev));
+  XLOG_INFO("sysname     : %s", udev_device_get_sysname(dev));
+  XLOG_INFO("devnode     : %s", udev_device_get_devnode(dev));
+
+  #if 0
+  unsigned bus_type;
+  unsigned short dev_vid;
+	unsigned short dev_pid;
+	char *serial_number_utf8 = NULL;
+	char *product_name_utf8 = NULL;
+
+  parse_uevent_info(
+    udev_device_get_sysattr_value(dev, "uevent"),
+    &bus_type,
+    &dev_vid,
+    &dev_pid,
+    &serial_number_utf8,
+    &product_name_utf8);
+
+  XLOG_INFO("bus type    : %s", udev_bustype_to_string(bus_type));
+  XLOG_INFO("vid         : %d", dev_vid);
+  XLOG_INFO("pid         : %d", dev_pid);
+  XLOG_INFO("serial      : %s", serial_number_utf8);
+  XLOG_INFO("product     : %s", product_name_utf8);
+  #endif
 }
