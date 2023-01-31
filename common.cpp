@@ -118,7 +118,7 @@ const char *udev_bustype_to_string(unsigned bus_type)
 void hid_command_packet_header_from_network(HIDCommandPacketHeader *pkt)
 {
   pkt->packet_size = le16toh(pkt->packet_size);
-  pkt->device_id = le16toh(pkt->device_id);
+  pkt->channel_id = le16toh(pkt->channel_id);
   pkt->packet_type = le16toh(pkt->packet_type);
   pkt->event_type = le16toh(pkt->event_type);
 }
@@ -126,7 +126,7 @@ void hid_command_packet_header_from_network(HIDCommandPacketHeader *pkt)
 void hid_command_packet_header_to_network(HIDCommandPacketHeader *pkt)
 {
   pkt->packet_size = htole16(pkt->packet_size);
-  pkt->device_id = htole16(pkt->device_id);
+  pkt->channel_id = htole16(pkt->channel_id);
   pkt->packet_type = htole16(pkt->packet_type);
   pkt->event_type = htole16(pkt->event_type);
 }
@@ -171,4 +171,12 @@ std::string  hipd_socketaddr_to_string(sockaddr_storage &ss)
   }
 
   return std::string(buff);
+}
+
+void hidp_push_fd(fd_set *set, int fd, int *max)
+{
+  FD_SET(fd, set);
+  if (fd > *max)
+    *max = fd;
+  // XLOG_INFO("fd_set(%p, %d) - max:%d", set, fd, *max);
 }

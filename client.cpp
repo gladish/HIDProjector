@@ -20,8 +20,8 @@
 
 class VirtualHID {
 public:
-  VirtualHID(int16_t device_id)
-    : m_device_id(device_id) {
+  VirtualHID(int16_t channel_id)
+    : m_channel_id(channel_id) {
     m_uhid_fd = open("/dev/uhid", O_RDWR | O_CLOEXEC);
   } 
   ~VirtualHID() {
@@ -39,18 +39,18 @@ public:
     return bytes_written;
   }
 
-  int16_t device_id() const { return m_device_id; }
+  int16_t channel_id() const { return m_channel_id; }
   int uhid_fd() const { return m_uhid_fd; }
 private:
-  int16_t m_device_id;
+  int16_t m_channel_id;
   int m_uhid_fd;
 };
 
 struct HIDMonitorClient {
 public:
   HIDMonitorClient(const char *server_addr, int server_port) {
-    m_server_fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (m_server_fd == -1) {
+    m_sock = socket(AF_INET, SOCK_STREAM, 0);
+    if (m_sock == -1) {
       XLOG_FATAL("socket:%s", strerror(errno));
     }
 
@@ -64,7 +64,7 @@ public:
     v4->sin_family = AF_INET;
     m_remote_endpoint_size = sizeof(struct sockaddr_in);
 
-    ret = connect(m_server_fd, reinterpret_cast<const struct sockaddr *>(&m_remote_endpoint), m_remote_endpoint_size);
+    ret = connect(m_sock, reinterpret_cast<const struct sockaddr *>(&m_remote_endpoint), m_remote_endpoint_size);
     if (ret == -1)
       XLOG_FATAL("connect:%s", strerror(errno));
   }
@@ -83,8 +83,8 @@ public:
     return reinterpret_cast<const TData>(p);
   }
 
-  void add_vhid(int16_t device_id) {
-    VirtualHID *vhid = new VirtualHID(device_id);
+  void add_vhid(int16_t channel_id) {
+    VirtualHID *vhid = new VirtualHID(channel_id);
 
     const struct uhid_create2_req *req = data<const struct uhid_create2_req *>();
     struct uhid_event e;
@@ -101,12 +101,12 @@ public:
 
   }
 
-  void remove_vhid(int16_t device_id) {
-    auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&device_id](const VirtualHID *item) {
-        return item->device_id() == device_id;
+  void remove_vhid(int16_t channel_id) {
+    auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&channel_id](const VirtualHID *item) {
+        return item->channel_id() == channel_id;
       });
     if (itr == std::end(m_vhids)) {
-      XLOG_WARN("failed to find VHID with id:%d", device_id);
+      XLOG_WARN("failed to find VHID with id:%d", channel_id);
       return;
     }
 
@@ -123,13 +123,13 @@ public:
     m_vhids.erase(itr);
   }
 
-  void submit_report(int16_t device_id) {
-    auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&device_id](const VirtualHID *item) {
-        return item->device_id() == device_id;
+  void submit_report(int16_t channel_id) {
+    auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&channel_id](const VirtualHID *item) {
+        return item->channel_id() == channel_id;
       });
 
     if (itr == std::end(m_vhids)) {
-      XLOG_INFO("failed to find VHID with id:%d", device_id);
+      XLOG_INFO("failed to find VHID with id:%d", channel_id);
       return;
     }
 
@@ -146,12 +146,15 @@ public:
     }
   }
 
+  int fd() const
+    { return m_sock; }
+
   int read_next_packet() {
     memset(m_read_buffer, 0, sizeof(m_read_buffer));
 
     const int sizeof_header = static_cast<int>(sizeof(HIDCommandPacketHeader));
 
-    int bytes_read = hidp_read_until(m_server_fd, &m_read_buffer[0], sizeof_header);
+    int bytes_read = hidp_read_until(m_sock, &m_read_buffer[0], sizeof_header);
     if (bytes_read < 0) {
       XLOG_ERROR("error reading packet header:%s", strerror(-bytes_read));
       return bytes_read;
@@ -161,7 +164,7 @@ public:
     hid_command_packet_header_from_network(header);
 
     // read remainder of packet
-    bytes_read = hidp_read_until(m_server_fd, &m_read_buffer[sizeof_header], (header->packet_size - sizeof_header));
+    bytes_read = hidp_read_until(m_sock, &m_read_buffer[sizeof_header], (header->packet_size - sizeof_header));
     if (bytes_read < 0) {
       XLOG_ERROR("error reading packet body. %s", strerror(-bytes_read));
       return -bytes_read;
@@ -170,8 +173,27 @@ public:
     return bytes_read;
   }
 
+  void push_vhid_fds(fd_set *set, int *max_fd) {
+    for  (VirtualHID *vhid : m_vhids) {
+      hidp_push_fd(set, vhid->uhid_fd(), max_fd);
+    }
+  }
+
+  void check_vhid_fds(fd_set *set, int server_fd) {
+    for (VirtualHID *vhid : m_vhids) {
+      if (FD_ISSET(vhid->uhid_fd(), set)) {
+        // TODO: kernel is asking for report, fwd to server
+        struct uhid_event e;
+        memset(&e, 0, sizeof(e));
+        ssize_t bytes_read = read(vhid->uhid_fd(), &e, sizeof(e));
+        XLOG_INFO("read from kernel:%d", (int) bytes_read);
+        XLOG_INFO("type:%d", e.type);
+      }
+    }
+  }
+
 private:
-  int m_server_fd;
+  int m_sock;
   socklen_t m_remote_endpoint_size;
   sockaddr_storage m_remote_endpoint;
   char m_read_buffer[sizeof(HIDCommandPacketHeader) + sizeof(struct uhid_event)];
@@ -182,31 +204,42 @@ int main(int argc, char *argv[])
 {
   int ret;
 
-  HIDMonitorClient *clnt = new HIDMonitorClient("10.0.0.133", 100220);
+  HIDMonitorClient *clnt = new HIDMonitorClient("10.0.0.133", 10020);
   if (!clnt)
     exit(1);
 
   while (true) {
-    ret = clnt->read_next_packet();
-    if (ret < 0) {
-      XLOG_ERROR("failed to read");
-      exit(1);
+    fd_set read_fds;
+    FD_ZERO(&read_fds);
+
+    int max_fd = -1;
+    hidp_push_fd(&read_fds, clnt->fd(), &max_fd);
+    clnt->push_vhid_fds(&read_fds, &max_fd);
+
+    int ret = select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
+    if (FD_ISSET(clnt->fd(), &read_fds)) {
+      ret = clnt->read_next_packet();
+      if (ret < 0) {
+        XLOG_ERROR("failed to read");
+        exit(1);
+      }
+      const HIDCommandPacketHeader *pkt = clnt->header();
+      switch (pkt->packet_type) {
+        case PacketTypeCreate:
+          clnt->add_vhid(pkt->channel_id);
+          break;
+        case PacketTypeDelete:
+          clnt->remove_vhid(pkt->channel_id);
+          break;
+        case PacketTypeReport:
+          clnt->submit_report(pkt->channel_id);
+          break;
+        default:
+          break;
+      }
     }
 
-    const HIDCommandPacketHeader *pkt = clnt->header();
-    switch (pkt->packet_type) {
-      case PacketTypeCreate:
-        clnt->add_vhid(pkt->device_id);
-        break;
-      case PacketTypeDelete:
-        clnt->remove_vhid(pkt->device_id);
-        break;
-      case PacketTypeReport:
-        clnt->submit_report(pkt->device_id);
-        break;
-      default:
-        break;
-    }
+    clnt->check_vhid_fds(&read_fds, clnt->fd());
   }
 
   return 0;
@@ -246,7 +279,7 @@ void hid_monitor_client_create(HIDMonitorClient *clnt)
   e.type = UHID_CREATE2;
   e.u.create2 = *req;
 
-  VirtualHID *vhid = clnt->new_vhid(header->device_id);
+  VirtualHID *vhid = clnt->new_vhid(header->channel_id);
 
   ssize_t bytes_written = write(vhid->uhid_fd(), &e, sizeof(e));
   if (bytes_written == -1) {

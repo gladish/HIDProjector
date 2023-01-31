@@ -29,7 +29,7 @@ struct HIDRawMonitor {
   struct udev_device *raw_dev;
   struct udev_device *hid_dev;
   char name[256];
-  int16_t device_id;
+  int16_t channel_id;
   char report_buff[256];
   ssize_t report_size;
 };
@@ -174,7 +174,7 @@ ssize_t ConnectedClient::send_report(HIDRawMonitor *mon)
   packet_size = htole16(packet_size);
   packet_type = htole16(packet_type);
   event_type = htole16(event_type);
-  int16_t device_id = htole16(mon->device_id);
+  int16_t channel_id = htole16(mon->channel_id);
 
   // size
   int16_t input_size = htole16( (int16_t) mon->report_size );
@@ -182,8 +182,8 @@ ssize_t ConnectedClient::send_report(HIDRawMonitor *mon)
   struct iovec iov[6];
   iov[0].iov_base = &packet_size;
   iov[0].iov_len = sizeof(packet_size);
-  iov[1].iov_base = &device_id;
-  iov[1].iov_len = sizeof(device_id);
+  iov[1].iov_base = &channel_id;
+  iov[1].iov_len = sizeof(channel_id);
   iov[2].iov_base = &packet_type;
   iov[2].iov_len = sizeof(packet_type);
   iov[3].iov_base = &event_type;
@@ -261,7 +261,7 @@ HIDRawMonitor *hidraw_monitor_from_udev(struct udev_device *dev)
 {
   HIDRawMonitor *mon = new HIDRawMonitor();
   memset(mon, 0, sizeof(HIDRawMonitor));
-  mon->device_id = next_hidraw_monitor_id++;
+  mon->channel_id = next_hidraw_monitor_id++;
   mon->raw_dev = udev_device_ref(dev);
   mon->hid_dev = udev_device_get_parent_with_subsystem_devtype(
     mon->raw_dev,
@@ -354,7 +354,7 @@ ssize_t ConnectedClient::send_create(HIDRawMonitor *mon)
   packet_size = htole16(packet_size);
   packet_type = htole16(packet_type);
   event_type = htole16(event_type);
-  int16_t device_id = htole16(mon->device_id);
+  int16_t channel_id = htole16(mon->channel_id);
 
   struct uhid_create2_req req;
   memset(&req, 0, sizeof(req));
@@ -373,8 +373,8 @@ ssize_t ConnectedClient::send_create(HIDRawMonitor *mon)
   struct iovec iov[5];
   iov[0].iov_base = &packet_size;
   iov[0].iov_len = sizeof(packet_size);
-  iov[1].iov_base = &device_id;
-  iov[1].iov_len = sizeof(device_id);
+  iov[1].iov_base = &channel_id;
+  iov[1].iov_len = sizeof(channel_id);
   iov[2].iov_base = &packet_type;
   iov[2].iov_len = sizeof(packet_type);
   iov[3].iov_base = &event_type;
@@ -401,7 +401,7 @@ ssize_t ConnectedClient::send_delete(HIDRawMonitor *mon)
 
   HIDCommandPacketHeader pkt;
   pkt.packet_size = sizeof(HIDCommandPacketHeader);
-  pkt.device_id = mon->device_id;
+  pkt.channel_id = mon->channel_id;
   pkt.packet_type = PacketTypeDelete;
   pkt.event_type = UHID_DESTROY;
   hid_command_packet_header_to_network(&pkt);
@@ -409,8 +409,8 @@ ssize_t ConnectedClient::send_delete(HIDRawMonitor *mon)
   struct iovec iov[4];
   iov[0].iov_base = &pkt.packet_size;
   iov[0].iov_len = sizeof(pkt.packet_size);
-  iov[1].iov_base = &pkt.device_id;
-  iov[1].iov_len = sizeof(pkt.device_id);
+  iov[1].iov_base = &pkt.channel_id;
+  iov[1].iov_len = sizeof(pkt.channel_id);
   iov[2].iov_base = &pkt.packet_type;
   iov[2].iov_len = sizeof(pkt.packet_type);
   iov[3].iov_base = &pkt.event_type;
@@ -426,14 +426,6 @@ ssize_t ConnectedClient::send_delete(HIDRawMonitor *mon)
   }
 
   return bytes_written;
-}
-
-void hidp_push_fd(fd_set *set, int fd, int *max)
-{
-  FD_SET(fd, set);
-  if (fd > *max)
-    *max = fd;
-  // XLOG_INFO("fd_set(%p, %d) - max:%d", set, fd, *max);
 }
 
 int parse_uevent_info(const char *uevent, unsigned *bus_type,
@@ -609,7 +601,6 @@ void hid_monitor_server_create_or_delete(HIDMonitorServer *server)
       const char *devnode = udev_device_get_devnode(mon->raw_dev);
       if (strcmp(devnode, udev_device_get_devnode(dev)) == 0) {
         server->client.send_delete(mon);
-        XLOG_INFO("removing active device 33:%d", (int) mon->device_id);
         begin = server->active_devices.erase(begin);
         break;
       }

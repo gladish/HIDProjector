@@ -25,13 +25,14 @@ enum xLogLevel
 enum PacketType {
   PacketTypeCreate = 0x01,
   PacketTypeDelete = 0x02,
-  PacketTypeReport = 0x03
+  PacketTypeReport = 0x03,
+  PacketTypeGetReport = 0x04
 };
 
 struct HIDCommandPacketHeader
 {
   int16_t packet_size;
-  int16_t device_id;
+  int16_t channel_id;
   int16_t packet_type;
   int16_t event_type;
   char    packet_data[0];
