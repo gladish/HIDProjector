@@ -6,6 +6,7 @@
 
 #include <sys/socket.h>
 #include <sys/time.h>
+#include <sys/uio.h>
 
 #include <errno.h>
 #include <fcntl.h>
@@ -129,6 +130,32 @@ public:
     XLOG_INFO("VHID removed");
   }
 
+  void submit_get_report_reply(int16_t channel_id) {
+    auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&channel_id](const VirtualHID *item) {
+        return item->channel_id() == channel_id;
+      });
+
+    if (itr == std::end(m_vhids)) {
+      XLOG_INFO("failed to find VHID with id:%d", channel_id);
+      return;
+    }
+
+    VirtualHID *vhid = *itr;
+
+    const struct uhid_get_report_reply_req *req = data<const uhid_get_report_reply_req *>();
+    struct uhid_event e;
+    e.type = UHID_GET_REPORT_REPLY;
+    e.u.get_report_reply.id = le32toh(req->id);
+    e.u.get_report_reply.err = le16toh(req->err);
+    e.u.get_report_reply.size = le16toh(req->size);
+    memcpy(e.u.get_report_reply.data, req->data, e.u.get_report_reply.size);
+
+    ssize_t bytes_written = vhid->write_event(&e);
+    if (bytes_written < 0) {
+      XLOG_INFO("TODO: handle write failed. %s", strerror(errno));
+    }
+  }
+
   void submit_report(int16_t channel_id) {
     auto itr = std::find_if(std::begin(m_vhids), std::end(m_vhids), [&channel_id](const VirtualHID *item) {
         return item->channel_id() == channel_id;
@@ -189,18 +216,38 @@ public:
     for (VirtualHID *vhid : m_vhids) {
       if (FD_ISSET(vhid->uhid_fd(), set)) {
         // TODO: kernel is asking for report, fwd to server
-        struct uhid_event e;
-        memset(&e, 0, sizeof(e));
+        struct uhid_event e = {};
         ssize_t bytes_read = read(vhid->uhid_fd(), &e, sizeof(e));
-        XLOG_INFO("read from kernel:%d", (int) bytes_read);
-        XLOG_INFO("type:%d", e.type);
-        if  (e.type == UHID_GET_REPORT) {
-          XLOG_INFO("id      :%d", e.u.get_report.id);
-          XLOG_INFO("rnum    :%d", e.u.get_report.rnum);
-          XLOG_INFO("rtype   :%d", e.u.get_report.rtype);
-        }
+        if (bytes_read > 0 && e.type == UHID_GET_REPORT)
+          forward_get_report_request(vhid, &e.u.get_report, server_fd);
       }
     }
+  }
+
+private:
+  void forward_get_report_request(VirtualHID *vhid, struct uhid_get_report_req *req, int server_sock) {
+    XLOG_INFO("forwarding get_report request");
+
+    HIDCommandPacketHeader pkt;
+    pkt.channel_id = vhid->channel_id();
+    pkt.packet_type = PacketTypeGetReportRequest;
+    pkt.event_type = UHID_GET_REPORT;
+    pkt.packet_size = sizeof(HIDCommandPacketHeader) + sizeof(struct uhid_get_report_req);
+    hid_command_packet_header_to_network(&pkt);
+
+    req->id = htole32(req->id);
+
+    struct iovec iov[2];
+    iov[0].iov_base = &pkt;
+    iov[0].iov_len = sizeof(pkt);
+    iov[1].iov_base = req;
+    iov[1].iov_len = sizeof(struct uhid_get_report_req);
+
+    ssize_t bytes_written = writev(server_sock, iov, 2);
+    if (bytes_written < 0)
+      XLOG_WARN("failed to send get report request. %s", strerror(errno));
+    else
+      XLOG_INFO("send get_report_request:%d", (int) bytes_written);
   }
 
 private:
@@ -245,6 +292,8 @@ int main(int argc, char *argv[])
         case PacketTypeReport:
           clnt->submit_report(pkt->channel_id);
           break;
+        case PacketTypeGetReportResponse:
+          clnt->submit_get_report_reply(pkt->channel_id);
         default:
           break;
       }

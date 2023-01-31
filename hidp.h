@@ -26,7 +26,8 @@ enum PacketType {
   PacketTypeCreate = 0x01,
   PacketTypeDelete = 0x02,
   PacketTypeReport = 0x03,
-  PacketTypeGetReport = 0x04
+  PacketTypeGetReportRequest = 0x04,
+  PacketTypeGetReportResponse = 0x05
 };
 
 struct HIDCommandPacketHeader

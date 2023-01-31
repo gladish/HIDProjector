@@ -20,6 +20,8 @@
 #include <linux/uhid.h>
 
 #include "hidp.h"
+
+#include <algorithm>
 #include <vector>
 
 struct HIDRawMonitor {
@@ -32,11 +34,33 @@ struct HIDRawMonitor {
   int16_t channel_id;
   char report_buff[256];
   ssize_t report_size;
+
+  ssize_t read_feature(struct uhid_get_report_req &req, struct uhid_get_report_reply_req &res) {
+    char buff[256];
+    buff[0] = req.rnum;
+
+    int ret = ioctl(fd, HIDIOCGFEATURE(256), buff);
+    if (ret < 0) {
+      int err = errno;
+      XLOG_ERROR("failed to request feature from device. %s", strerror(err));
+      return -err;
+    }
+
+    res.id = req.id;
+    res.err = 0;
+    res.size = ret;
+    memcpy(res.data, buff, ret);
+
+    return ret;
+  }
 };
 
 class ConnectedClient {
 public:
   ConnectedClient() : m_fd(-1) { }
+
+  int fd() const
+    { return m_fd; }
 
   void set_connected(int fd) {
     m_fd = fd;
@@ -75,6 +99,59 @@ public:
   {
     memset(&listen_addr, 0, sizeof(listen_addr));
     listen_addr_size = sizeof(listen_addr);
+  }
+
+  void read_incoming_vhid_request() {
+    HIDCommandPacketHeader header;
+    int bytes_read = hidp_read_until(client.fd(), &header, sizeof(HIDCommandPacketHeader));
+    if (bytes_read < 0) {
+      XLOG_WARN("failed to read invoming VHID request. %s", strerror(-bytes_read));
+      return;
+    }
+
+    hid_command_packet_header_from_network(&header);
+
+    struct uhid_get_report_req req;
+    bytes_read = hidp_read_until(client.fd(), &req, sizeof(req));
+    if (bytes_read < 0) {
+      XLOG_WARN("failed to read VHID request. %s", strerror(-bytes_read));
+    }
+
+    auto itr = std::find_if(std::begin(active_devices), std::end(active_devices), 
+      [&header](HIDRawMonitor *mon)
+      {
+        return mon->channel_id == header.channel_id;
+      });
+
+    if (itr == std::end(active_devices)) {
+      XLOG_WARN("failed to find HIDRawMonitor for channel:%d", header.channel_id);
+      return;
+    }
+
+    struct uhid_get_report_reply_req res;
+    ssize_t n = (*itr)->read_feature(req, res);
+
+    res.id = htole32(res.id);
+    res.err = htole16(res.err);
+    res.size = htole16(res.size);
+
+    header.packet_size = (n + sizeof(HIDCommandPacketHeader) + 8);
+    header.packet_type = PacketTypeGetReportResponse;
+    header.event_type = UHID_GET_REPORT_REPLY;
+    hid_command_packet_header_to_network(&header);
+
+    struct iovec iov[2];
+    iov[0].iov_base = &header;
+    iov[0].iov_len = sizeof(header);
+    iov[1].iov_base = &res;
+    iov[1].iov_len = 10 + n;
+
+    ssize_t bytes_written = writev(client.fd(), iov, 2);
+    if (bytes_written < 0) {
+      int err = errno;
+      XLOG_WARN("failed to write get_report reply. %s", strerror(err));
+      return;
+    }
   }
 
   int listen_fd;
@@ -127,10 +204,17 @@ int main(int argc, char *argv[])
     for (HIDRawMonitor *mon : server->active_devices)
       hidp_push_fd(&read_fds, mon->fd, &max_fd);
 
+    if (server->client.fd() != -1)
+      hidp_push_fd(&read_fds, server->client.fd(), &max_fd);
+
     int ret = select(max_fd + 1, &read_fds, nullptr, nullptr, nullptr);
     if (ret == -1) {
       XLOG_WARN("select:%s", strerror(errno));
       continue;
+    }
+
+    if ((server->client.fd() != -1) && FD_ISSET(server->client.fd(), &read_fds)) {
+      server->read_incoming_vhid_request();
     }
 
     if (FD_ISSET(server->listen_fd, &read_fds))
