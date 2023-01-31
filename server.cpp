@@ -64,6 +64,13 @@ public:
   int fd() const
     { return m_fd; }
 
+  void reset() {
+    if (m_fd != -1) {
+      close(m_fd);
+      m_fd = -1;
+    }
+  }
+
   void set_connected(int fd) {
     m_fd = fd;
 
@@ -73,7 +80,7 @@ public:
     // TODO: check length of m_remote_endpoint_length
     m_remote_endpoint.ss_family = AF_INET;
 
-    XLOG_INFO("new client connection from%s", hipd_socketaddr_to_string(m_remote_endpoint)
+    XLOG_INFO("new client connection from:%s", hipd_socketaddr_to_string(m_remote_endpoint)
       .c_str());
   }
 
@@ -107,6 +114,7 @@ public:
     HIDCommandPacketHeader header;
     int bytes_read = hidp_read_until(client.fd(), &header, sizeof(HIDCommandPacketHeader));
     if (bytes_read < 0) {
+      client.reset();
       XLOG_WARN("failed to read invoming VHID request. %s", strerror(-bytes_read));
       return;
     }
@@ -116,7 +124,9 @@ public:
     struct uhid_get_report_req req;
     bytes_read = hidp_read_until(client.fd(), &req, sizeof(req));
     if (bytes_read < 0) {
+      client.reset();
       XLOG_WARN("failed to read VHID request. %s", strerror(-bytes_read));
+      return;
     }
 
     auto itr = std::find_if(std::begin(active_devices), std::end(active_devices), 
@@ -153,9 +163,6 @@ public:
       int err = errno;
       XLOG_WARN("failed to write get_report reply. %s", strerror(err));
       return;
-    }
-    else {
-      XLOG_INFO("bytes_written:%d", bytes_written);
     }
   }
 
@@ -242,6 +249,7 @@ int main(int argc, char *argv[])
           server->client.send_delete(mon);
           delete mon;
           begin = server->active_devices.erase(begin);
+          XLOG_INFO("break");
           break;
         }
       }
