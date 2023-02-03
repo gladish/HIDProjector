@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
         reader.ProcessIncomingServerMessage(input_devices);
       }
       for (std::unique_ptr<InputDevice> &dev : input_devices) {
-        if (fd_is_set(read_fds, *dev)) {
+        if (fd_is_set(read_fds, dev)) {
           ProtocolWriter writer(client.GetSocket());
           writer.SendGetReportRequest(dev);
         }
