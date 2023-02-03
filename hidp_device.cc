@@ -81,24 +81,28 @@ InputDeviceMonitor::ReadNext(InputDeviceAdded on_device_added, InputDeviceRemove
   XLOG_INFO("InputDeviceMonitor triggered with action '%s'", action);
 
   if (strcasecmp(action, "remove") == 0) {
-    const char *device_node = udev_device_get_devnode(dev);
-    if (device_node) {
-      auto itr = m_device_ids.find(device_node);
-      if (itr != std::end(m_device_ids) && on_device_removed) {
-        on_device_removed(itr->second);
+    const char *syspath = udev_device_get_syspath(dev);
+    XLOG_INFO("remove device '%s'", syspath);
+    if (syspath) {
+      auto itr = m_device_ids.find(syspath);
+      if (itr != std::end(m_device_ids)) {
+        if (on_device_removed)
+          on_device_removed(itr->second);
         m_device_ids.erase(itr);
       }
-    }
-    else {
-      XLOG_WARN("device  node for '%s' is NULL", udev_device_get_syspath(dev));
     }
   }
 
   if (strcasecmp(action, "add") == 0) {
-    if (on_device_added) {
-      std::unique_ptr<InputDevice> new_device = InputDeviceMonitor::FromDevice(dev);
+    std::unique_ptr<InputDevice> new_device = InputDeviceMonitor::FromDevice(dev);
+
+    const char *syspath = udev_device_get_syspath(dev);
+    m_device_ids.insert(std::make_pair(syspath, new_device->GetId()));
+
+    XLOG_INFO("insert device '%s' -> '%s'", syspath, new_device->GetId().c_str());
+
+    if (on_device_added)
       on_device_added(std::move(new_device));
-    }
   }
 
   udev_device_unref(dev);
@@ -167,17 +171,23 @@ std::unique_ptr<InputDevice> InputDeviceMonitor::FromDevice(udev_device *dev)
 }
 #endif
 
-void
+int
 InputDevice::ReadInputReport()
 {
   ssize_t n = read(m_fd, m_input_report, sizeof(m_input_report));
   if (n > 0)
     m_input_report_size = static_cast<int16_t>(n);
-  else
-    hidp_throw_errno(errno, "failed to read input report");
+  else {
+    int err = errno;
+    XLOG_INFO("error reading input report for '%s'. %s", m_name, strerror(err));
+    close(m_fd);
+    m_fd = -1;
+    return -err;
+  }
+  return m_input_report_size;
 }
 
-void InputDevice::GetName(char *buff, int count) const
+std::string InputDevice::GetName() const
 {
-  strncpy(buff, m_name, count);
+  return std::string(m_name);
 }

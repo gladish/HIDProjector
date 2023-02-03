@@ -27,10 +27,10 @@ public:
   inline int16_t GetBusType() const;
   inline int16_t GetProductId() const;
   inline int16_t GetVendorId() const;
-  void ReadInputReport();
-  void GetName(char *buff, int count) const;
+  int ReadInputReport();
   inline Buffer<uint16_t> GetHIDReport() const;
   inline Buffer<uint32_t> GetHIDDescriptor() const;
+  std::string GetName() const;
 private:
   InputDevice();
   int16_t       m_channel_id;

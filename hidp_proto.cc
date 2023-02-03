@@ -48,7 +48,10 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   req.product = htole32(dev->GetProductId());
   const std::string id = dev->GetId();
   memcpy(req.uniq, id.c_str(), id.size());
-  dev->GetName(reinterpret_cast<char *>(req.name), sizeof(req.name));
+
+  std::string name = dev->GetName();
+  memcpy(req.name, name.c_str(), sizeof(req.name));
+
   Buffer<uint32_t> descriptor = dev->GetHIDDescriptor();
   req.rd_size = htole32(descriptor.Length);
   memcpy(req.rd_data, descriptor.Data, descriptor.Length);

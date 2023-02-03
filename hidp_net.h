@@ -112,7 +112,9 @@ template<class T>
 void fd_set_add(fd_set& set, const T& carrier, int *max)
 {
   int fd = __ref(carrier).GetFD();
-  FD_SET(fd, &set);
-  if (fd > *max)
-    *max = fd;
+  if (fd != -1) {
+    FD_SET(fd, &set);
+    if (fd > *max)
+      *max = fd;
+  }
 }
