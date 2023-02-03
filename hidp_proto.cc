@@ -33,8 +33,6 @@ namespace {
 void
 ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
 {
-  XLOG_INFO("sending create");
-
   if (!m_socket.IsConnected())
     return;
 
@@ -55,12 +53,14 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   req.rd_size = htole32(descriptor.Length);
   memcpy(req.rd_data, descriptor.Data, descriptor.Length);
 
+  #if 0
   for (int i = 1; i <= req.rd_size; ++i) {
     printf("0x%02x ", req.rd_data[i -1]);
     if (i % 16 == 0)
       printf("\n");
   }
   printf("\n");
+  #endif
 
   DumpSendCreate(header, req);
 
@@ -70,7 +70,6 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   iov[1].iov_base = &req;
   iov[1].iov_len = sizeof(uhid_create2_req);
 
-  XLOG_INFO("SendCreate");
   Send(iov, 2);
 }
 
@@ -90,7 +89,6 @@ ProtocolWriter::SendDelete(const std::unique_ptr<InputDevice> &dev)
   iov[0].iov_base = &header;
   iov[0].iov_len = sizeof(header);
 
-  XLOG_INFO("SendDelete");
   Send(iov, 1);
 }
 
@@ -263,7 +261,7 @@ ProtocolReader::ProcessIncomingServerMessage(std::vector< std::unique_ptr<InputD
       });
 
     if (itr == std::end(local_devices)) {
-      XLOG_INFO("got incoming message for channel %d ,but can't find local device",
+      XLOG_WARN("got incoming message for channel %d, but can't find local device",
         header.ChannelId);
       return;
     }
@@ -291,6 +289,25 @@ ProtocolReader::ProcessIncomingServerMessage(std::vector< std::unique_ptr<InputD
 void
 ProtocolReader::ProcessDelete(Header const &header, std::vector<std::unique_ptr<InputDevice>> &local_devices)
 {
+  uhid_event e;
+  e.type = UHID_DESTROY;
+
+  auto itr = std::find_if(std::begin(local_devices), std::end(local_devices),
+    [&header](std::unique_ptr<InputDevice> const &dev) {
+      return dev->ChannelId() == header.ChannelId;
+    });
+
+  if (itr == std::end(local_devices)) {
+    XLOG_WARN("got request for channel %d, but there's no local device.", header.ChannelId);
+    return;
+  }
+
+  std::unique_ptr<InputDevice>& dev = *itr;
+  ssize_t bytes_written = write(dev->Descriptor(), &e, sizeof(e));
+  if (bytes_written < 0)
+    hidp_throw_errno(errno, "failed to destroy virtual HID device");
+
+  local_devices.erase(itr);
 }
 
 void
@@ -299,11 +316,8 @@ ProtocolReader::ProcessInputReport(Header const &header, std::unique_ptr<InputDe
   uhid_event e;
   m_socket.Read(&e.u.input2, header.PacketSize);
 
-  XLOG_INFO("size:%d", e.u.input2.size);
-
   e.type = UHID_INPUT2;
   e.u.input2.size = le16toh(e.u.input2.size);
-
 
   ssize_t bytes_written = write(dev->Descriptor(), &e, sizeof(e));
   if (bytes_written < 0)
@@ -367,8 +381,6 @@ ProtocolReader::ProcessCreate(Header const &header, std::vector<std::unique_ptr<
   ssize_t bytes_written = write(new_device->m_fd, &e, sizeof(e));
   if (bytes_written < 0)
     hidp_throw_errno(errno, "failed to create new virtual HID");
-  else
-    XLOG_INFO("bytes_written:%d", static_cast<int>(bytes_written));
   local_devices.push_back(std::move(new_device));
 }
 
@@ -391,12 +403,13 @@ ProtocolWriter::SendGetReportRequest(const std::unique_ptr<InputDevice> &dev)
   header.PacketType = static_cast<int16_t>(PacketType::GetReportReq);
   HeaderToNetwork(header);
 
+  #if 0
   XLOG_INFO("type:%d", e.type);
   XLOG_INFO("size:%d", static_cast<int>(bytes_read));
-
   XLOG_INFO("get_report.id:%d", e.u.get_report.id);
   XLOG_INFO("get_report.rnum:%d", e.u.get_report.rnum);
   XLOG_INFO("get_report.rtype:%d", e.u.get_report.rtype);
+  #endif
 
   e.u.get_report.id = htole32(e.u.get_report.id);
 
@@ -406,6 +419,5 @@ ProtocolWriter::SendGetReportRequest(const std::unique_ptr<InputDevice> &dev)
   iov[1].iov_base = &e.u.get_report;
   iov[1].iov_len = sizeof(uhid_get_report_req);
 
-  XLOG_INFO("SendGetReportRequeset");
   Send(iov, 2);
 }
