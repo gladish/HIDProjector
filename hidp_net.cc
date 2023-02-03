@@ -117,8 +117,10 @@ int Socket::Read(void *buff, int count)
       Close();
       return -err;
     }
+    XLOG_INFO("recv:%d", (int) n);
     bytes_read += n;
   }
+  XLOG_INFO("read:%d", (int) bytes_read);
   return static_cast<int>(bytes_read);
 }
 
@@ -129,6 +131,7 @@ int Socket::Write(const void* buff, int count)
     Close();
     hidp_throw_errno(errno, "failed to write %d bytes", count);
   }
+  XLOG_INFO("write:%d", (int) bytes_written);
   return static_cast<int>(bytes_written);
 }
 
@@ -162,6 +165,13 @@ Socket::Connect(const char *addr, int port)
 void
 Socket::Bind(const char *addr, int port)
 {
+  if (m_fd != -1)
+    Close();
+
+  m_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (m_fd == -1)
+    hidp_throw_errno(errno, "failed to create socket");
+
   XLOG_INFO("binding interface to %s:%d", addr, port);
   ParseAddressAndPort(addr, port, m_local_endpoint, m_local_endpoint_length);
 

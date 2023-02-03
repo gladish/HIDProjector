@@ -11,6 +11,7 @@
 #include <linux/uhid.h>
 #include <sys/ioctl.h>
 #include <sys/uio.h>
+#include <linux/hidraw.h>
 
 namespace {
   void DumpSendCreate(Header const &header, uhid_create2_req const &req)
@@ -69,6 +70,7 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   iov[1].iov_base = &req;
   iov[1].iov_len = sizeof(uhid_create2_req);
 
+  XLOG_INFO("SendCreate");
   Send(iov, 2);
 }
 
@@ -88,6 +90,7 @@ ProtocolWriter::SendDelete(const std::unique_ptr<InputDevice> &dev)
   iov[0].iov_base = &header;
   iov[0].iov_len = sizeof(header);
 
+  XLOG_INFO("SendDelete");
   Send(iov, 1);
 }
 
@@ -97,7 +100,7 @@ ProtocolWriter::SendInputReport(const std::unique_ptr<InputDevice> &dev)
   if (!m_socket.IsConnected())
     return;
 
-  auto report = dev->GetReport();
+  Buffer<uint16_t> report = dev->GetReport();
 
   Header header;
   header.PacketSize = sizeof(report.Length) + report.Length;
@@ -105,13 +108,18 @@ ProtocolWriter::SendInputReport(const std::unique_ptr<InputDevice> &dev)
   header.PacketType = static_cast<int16_t>(PacketType::InputReport);
   HeaderToNetwork(header);
 
+  // uhid_input2_req req;
+  // req.size = htole16(report.Length);
+  // memcpy(req.data, report.Data, report.Length);
+  int16_t length = htole16(report.Length);
+
   iovec iov[3];
   iov[0].iov_base = &header;
   iov[0].iov_len = sizeof(header);
-  iov[1].iov_base = &report.Length;
-  iov[1].iov_len = sizeof(report.Length);
-  iov[2].iov_base = const_cast<uint8_t *>(report.Data);
-  iov[2].iov_len = report.Length;
+  iov[1].iov_base = &length;
+  iov[1].iov_len = sizeof(length);
+  iov[2].iov_base = (void *) (report.Data);
+  iov[2].iov_len = length;
 
   Send(iov, 3);
 }
@@ -124,7 +132,6 @@ ProtocolWriter::Send(iovec *v, int n)
     m_socket.Close();
     hidp_throw_errno(errno, "writev failed");
   }
-  XLOG_INFO("writev:%d", static_cast<int>(bytes_written));
 }
 
 void HeaderToNetwork(Header &header)
@@ -142,19 +149,60 @@ void HeaderFromNetwork(Header &header)
 }
 
 void
-ProtocolReader::ProcessIncomingClientMessage()
+ProtocolReader::ProcessIncomingClientMessage(std::vector< std::unique_ptr<InputDevice> > &local_devices)
 {
   try {
     const Header header = ReadHeader();
     if (header.PacketType == static_cast<int16_t>(PacketType::GetReportReq)) {
+      auto itr = std::find_if(std::begin(local_devices), std::end(local_devices),
+        [&header](std::unique_ptr<InputDevice> const &dev) {
+          return dev->ChannelId() == header.ChannelId;
+        });
+
+      if (itr == std::end(local_devices)) {
+        XLOG_WARN("got request for channel %d, but there's no local device.",
+          header.ChannelId);
+        return;
+      }
+
+      // TODO: this code probably belongs in InputDevice
       uhid_get_report_req req;
       m_socket.Read(&req, header.PacketSize);
+      req.id = le32toh(req.id);
 
-      XLOG_INFO("finish processing get report request");
+      char buff[256];
+      buff[0] = req.rnum;
 
-      // TODO: find the InputDevice associated with the channel
-      // do the ioctl() to get report
-      // send back to m_socket
+      int ret = ioctl((*itr)->Descriptor(), HIDIOCGFEATURE(256), buff);
+      if (ret < 0) {
+        int err = errno;
+        XLOG_ERROR("failed to request feature from device. %s", strerror(err));
+        return;
+      }
+
+      // TODO: this code belongs in ProtocolWriter
+      uhid_get_report_reply_req res;
+      res.id = htole32(req.id);
+      res.err = htole16(0);
+      res.size = htole16(ret);
+
+      Header header;
+      header.PacketSize = sizeof(uhid_get_report_reply_req);
+      header.ChannelId = (*itr)->ChannelId();
+      header.PacketType = static_cast<int16_t>(PacketType::GetReportRes);
+      HeaderToNetwork(header);
+
+      iovec iov[2];
+      iov[0].iov_base = &header;
+      iov[0].iov_len = sizeof(header);
+      iov[1].iov_base = &res;
+      iov[1].iov_len = sizeof(uhid_get_report_reply_req);
+
+      ssize_t bytes_written = writev(m_socket.Descriptor(), iov, 2);
+      if (bytes_written < 0) {
+        m_socket.Close();
+        hidp_throw_errno(errno, "writev failed");
+      }
     }
   }
   catch (std::exception const &err) {
@@ -282,6 +330,7 @@ ProtocolWriter::SendGetReportRequest(const std::unique_ptr<InputDevice> &dev)
   iov[1].iov_base = &e.u.get_report;
   iov[1].iov_len = sizeof(uhid_get_report_req);
 
+  XLOG_INFO("SendGetReportRequeset");
   Send(iov, 2);
 
 }

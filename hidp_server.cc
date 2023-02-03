@@ -46,7 +46,7 @@ int main(int argc, char *argv[])
 
     if (client && fd_is_set(read_fds, client)) {
       ProtocolReader reader(*client);
-      reader.ProcessIncomingClientMessage();
+      reader.ProcessIncomingClientMessage(input_devices);
     }
     
     if (fd_is_set(read_fds, device_monitor)) {

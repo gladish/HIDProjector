@@ -50,7 +50,7 @@ class ProtocolReader {
 public:
   ProtocolReader(Socket &socket)
     : m_socket(socket) { }
-  void ProcessIncomingClientMessage();
+  void ProcessIncomingClientMessage(std::vector< std::unique_ptr<InputDevice> > &local_devices);
   void ProcessIncomingServerMessage(std::vector< std::unique_ptr<InputDevice> > &local_devices);
 private:
   Header ReadHeader();
