@@ -300,6 +300,8 @@ ProtocolReader::ProcessDelete(Header const &header, std::vector<std::unique_ptr<
   uhid_event e;
   e.type = UHID_DESTROY;
 
+  XLOG_INFO("delete device on channel %d", header.ChannelId);
+
   auto itr = std::find_if(std::begin(local_devices), std::end(local_devices),
     [&header](std::unique_ptr<InputDevice> const &dev) {
       return dev->GetChannelId() == header.ChannelId;
@@ -371,7 +373,9 @@ ProtocolReader::ProcessCreate(Header const &header, std::vector<std::unique_ptr<
   new_device->m_product_id = static_cast<int16_t>(req.product);
   new_device->m_uuid = ""; // TODO encode uuid on server-side
 
-  XLOG_INFO("creating new virtual HID for '%s'", new_device->m_name);
+  XLOG_INFO("creating new virtual HID for '%s' on channel %d", new_device->m_name,
+    new_device->m_channel_id);
+
   uhid_event e;
   e.type = UHID_CREATE2;
   e.u.create2 = req;
