@@ -20,7 +20,7 @@ public:
   void Bind(const char *addr, int port);
   void Connect(const char *addr, int port);
   void Close();
-  inline int Descriptor() const;
+  inline int GetFD() const;
   inline bool IsConnected() const;
 private:
   Socket(int fd) 
@@ -40,7 +40,7 @@ public:
   TcpListener(const char *addr, int port);
   void Start();
   std::unique_ptr<Socket> Accept();
-  inline int Descriptor() const;
+  inline int GetFD() const;
 private:
   std::string       m_local_addr;
   int               m_local_port;
@@ -51,7 +51,7 @@ class TcpClient {
 public:
   inline int Read(void *buff, int count);
   inline int Write(const void* buff, int count);
-  inline int Descriptor() const;
+  inline int GetFD() const;
   inline Socket& GetSocket();
   void Connect(const char *addr, int port);
   inline bool IsConnected() const;
@@ -74,9 +74,9 @@ inline int TcpClient::Write(const void *buff, int count)
   return m_socket.Write(buff, count);
 }
 
-inline int TcpClient::Descriptor() const
+inline int TcpClient::GetFD() const
 {
-  return m_socket.Descriptor();
+  return m_socket.GetFD();
 }
 
 inline Socket& TcpClient::GetSocket()
@@ -89,12 +89,12 @@ inline bool Socket::IsConnected() const
   return m_fd != -1;
 }
 
-inline int TcpListener::Descriptor() const
+inline int TcpListener::GetFD() const
 {
-  return m_socket.Descriptor();
+  return m_socket.GetFD();
 }
 
-inline int Socket::Descriptor() const
+inline int Socket::GetFD() const
 {
   return m_fd;
 }
@@ -105,13 +105,13 @@ template<class T> const T& __ref(const std::unique_ptr<T> &obj) { return *obj.ge
 template<class T>
 inline bool fd_is_set(fd_set& set, const T& carrier)
 {
-  return FD_ISSET(__ref(carrier).Descriptor(), &set);
+  return FD_ISSET(__ref(carrier).GetFD(), &set);
 }
 
 template<class T>
 void fd_set_add(fd_set& set, const T& carrier, int *max)
 {
-  int fd = __ref(carrier).Descriptor();
+  int fd = __ref(carrier).GetFD();
   FD_SET(fd, &set);
   if (fd > *max)
     *max = fd;

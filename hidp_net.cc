@@ -78,7 +78,7 @@ TcpListener::Start()
 {
   m_socket.Bind(m_local_addr.c_str(), m_local_port);
 
-  int ret = listen(m_socket.Descriptor(), 2);
+  int ret = listen(m_socket.GetFD(), 2);
   if (ret == -1)
     hidp_throw_errno(errno, "failed to put socket in listen mode");
 }
@@ -89,7 +89,7 @@ TcpListener::Accept()
   sockaddr_storage remote_endpoint;
   socklen_t remote_endpoint_length = sizeof(remote_endpoint);
 
-  int fd = accept(m_socket.Descriptor(), reinterpret_cast<sockaddr *>(&remote_endpoint), &remote_endpoint_length);
+  int fd = accept(m_socket.GetFD(), reinterpret_cast<sockaddr *>(&remote_endpoint), &remote_endpoint_length);
   if (fd == -1)
     hidp_throw_errno(errno, "failed to accept incoming connection");
 

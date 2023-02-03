@@ -38,7 +38,7 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
 
   Header header;
   header.PacketSize = sizeof(uhid_create2_req);
-  header.ChannelId = dev->ChannelId();
+  header.ChannelId = dev->GetChannelId();
   header.PacketType = static_cast<int16_t>(PacketType::Create);
   HeaderToNetwork(header);
 
@@ -49,7 +49,7 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   const std::string id = dev->GetId();
   memcpy(req.uniq, id.c_str(), id.size());
   dev->GetName(reinterpret_cast<char *>(req.name), sizeof(req.name));
-  Buffer<uint32_t> descriptor = dev->GetDescriptor();
+  Buffer<uint32_t> descriptor = dev->GetHIDDescriptor();
   req.rd_size = htole32(descriptor.Length);
   memcpy(req.rd_data, descriptor.Data, descriptor.Length);
 
@@ -81,7 +81,7 @@ ProtocolWriter::SendDelete(const std::unique_ptr<InputDevice> &dev)
 
   Header header;
   header.PacketSize = 0;
-  header.ChannelId = dev->ChannelId();
+  header.ChannelId = dev->GetChannelId();
   header.PacketType = static_cast<int16_t>(PacketType::Delete);
   HeaderToNetwork(header);
 
@@ -98,11 +98,11 @@ ProtocolWriter::SendInputReport(const std::unique_ptr<InputDevice> &dev)
   if (!m_socket.IsConnected())
     return;
 
-  Buffer<uint16_t> report = dev->GetReport();
+  Buffer<uint16_t> report = dev->GetHIDReport();
 
   Header header;
   header.PacketSize = sizeof(report.Length) + report.Length;
-  header.ChannelId = dev->ChannelId();
+  header.ChannelId = dev->GetChannelId();
   header.PacketType = static_cast<int16_t>(PacketType::InputReport);
   HeaderToNetwork(header);
 
@@ -125,7 +125,7 @@ ProtocolWriter::SendInputReport(const std::unique_ptr<InputDevice> &dev)
 void
 ProtocolWriter::Send(iovec *v, int n)
 {
-  ssize_t bytes_written = writev(m_socket.Descriptor(), v, n);
+  ssize_t bytes_written = writev(m_socket.GetFD(), v, n);
   if (bytes_written < 0) {
     m_socket.Close();
     hidp_throw_errno(errno, "writev failed");
@@ -154,7 +154,7 @@ ProtocolReader::ProcessIncomingClientMessage(std::vector<std::unique_ptr<InputDe
     if (header.PacketType == static_cast<int16_t>(PacketType::GetReportReq)) {
       auto itr = std::find_if(std::begin(local_devices), std::end(local_devices),
         [&header](std::unique_ptr<InputDevice> const &dev) {
-          return dev->ChannelId() == header.ChannelId;
+          return dev->GetChannelId() == header.ChannelId;
         });
 
       if (itr == std::end(local_devices)) {
@@ -176,7 +176,7 @@ ProtocolReader::ProcessIncomingClientMessage(std::vector<std::unique_ptr<InputDe
       char buff[256];
       buff[0] = req.rnum;
 
-      int ret = ioctl((*itr)->Descriptor(), HIDIOCGFEATURE(256), buff);
+      int ret = ioctl((*itr)->GetFD(), HIDIOCGFEATURE(256), buff);
       if (ret < 0) {
         int err = errno;
         XLOG_ERROR("failed to request feature from device. %s", strerror(err));
@@ -192,7 +192,7 @@ ProtocolReader::ProcessIncomingClientMessage(std::vector<std::unique_ptr<InputDe
 
       Header header;
       header.PacketSize = sizeof(uhid_get_report_reply_req);
-      header.ChannelId = (*itr)->ChannelId();
+      header.ChannelId = (*itr)->GetChannelId();
       header.PacketType = static_cast<int16_t>(PacketType::GetReportRes);
       HeaderToNetwork(header);
 
@@ -202,7 +202,7 @@ ProtocolReader::ProcessIncomingClientMessage(std::vector<std::unique_ptr<InputDe
       iov[1].iov_base = &res;
       iov[1].iov_len = sizeof(uhid_get_report_reply_req);
 
-      ssize_t bytes_written = writev(m_socket.Descriptor(), iov, 2);
+      ssize_t bytes_written = writev(m_socket.GetFD(), iov, 2);
       if (bytes_written < 0) {
         m_socket.Close();
         hidp_throw_errno(errno, "writev failed");
@@ -239,8 +239,7 @@ ProtocolReader::ProcessGetReportResponse(Header const &header, std::unique_ptr<I
   e.u.get_report_reply.size = le16toh(req.size);
   memcpy(e.u.get_report_reply.data, req.data, e.u.get_report_reply.size);
 
-  int fd = dev->Descriptor();
-  ssize_t bytes_written = write(fd, &e, sizeof(e));
+  ssize_t bytes_written = write(dev->GetFD(), &e, sizeof(e));
   if (bytes_written < 0)
     XLOG_WARN("failed to write GetReportReply. %s", strerror(errno));
 }
@@ -263,7 +262,7 @@ ProtocolReader::ProcessIncomingServerMessage(std::vector< std::unique_ptr<InputD
 
     auto itr = std::find_if(std::begin(local_devices), std::end(local_devices), 
       [&header](const std::unique_ptr<InputDevice> &dev) {
-        return header.ChannelId == dev->ChannelId();
+        return header.ChannelId == dev->GetChannelId();
       });
 
     if (itr == std::end(local_devices)) {
@@ -300,7 +299,7 @@ ProtocolReader::ProcessDelete(Header const &header, std::vector<std::unique_ptr<
 
   auto itr = std::find_if(std::begin(local_devices), std::end(local_devices),
     [&header](std::unique_ptr<InputDevice> const &dev) {
-      return dev->ChannelId() == header.ChannelId;
+      return dev->GetChannelId() == header.ChannelId;
     });
 
   if (itr == std::end(local_devices)) {
@@ -309,7 +308,7 @@ ProtocolReader::ProcessDelete(Header const &header, std::vector<std::unique_ptr<
   }
 
   std::unique_ptr<InputDevice>& dev = *itr;
-  ssize_t bytes_written = write(dev->Descriptor(), &e, sizeof(e));
+  ssize_t bytes_written = write(dev->GetFD(), &e, sizeof(e));
   if (bytes_written < 0)
     hidp_throw_errno(errno, "failed to destroy virtual HID device");
 
@@ -325,7 +324,7 @@ ProtocolReader::ProcessInputReport(Header const &header, std::unique_ptr<InputDe
   e.type = UHID_INPUT2;
   e.u.input2.size = le16toh(e.u.input2.size);
 
-  ssize_t bytes_written = write(dev->Descriptor(), &e, sizeof(e));
+  ssize_t bytes_written = write(dev->GetFD(), &e, sizeof(e));
   if (bytes_written < 0)
     hidp_throw_errno(errno, "failed to write input event");
 }
@@ -394,7 +393,7 @@ void
 ProtocolWriter::SendGetReportRequest(const std::unique_ptr<InputDevice> &dev)
 {
   uhid_event e;
-  ssize_t bytes_read = read(dev->Descriptor(), &e, sizeof(e));
+  ssize_t bytes_read = read(dev->GetFD(), &e, sizeof(e));
   if (bytes_read == -1) {
     XLOG_ERROR("failed to read GetReport request from uhid. %s", strerror(errno));
     return;
@@ -405,7 +404,7 @@ ProtocolWriter::SendGetReportRequest(const std::unique_ptr<InputDevice> &dev)
 
   Header header;
   header.PacketSize = sizeof(uhid_get_report_req);
-  header.ChannelId = dev->ChannelId();
+  header.ChannelId = dev->GetChannelId();
   header.PacketType = static_cast<int16_t>(PacketType::GetReportReq);
   HeaderToNetwork(header);
 

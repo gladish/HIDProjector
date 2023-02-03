@@ -21,16 +21,16 @@ class InputDevice {
   friend class InputDeviceMonitor;
   friend class ProtocolReader;
 public:
-  inline int16_t ChannelId() const;
-  inline int Descriptor() const;
+  inline int16_t GetChannelId() const;
+  inline int GetFD() const;
   inline std::string GetId() const;
   inline int16_t GetBusType() const;
   inline int16_t GetProductId() const;
   inline int16_t GetVendorId() const;
   void ReadInputReport();
   void GetName(char *buff, int count) const;
-  inline Buffer<uint16_t> GetReport() const;
-  inline Buffer<uint32_t> GetDescriptor() const;
+  inline Buffer<uint16_t> GetHIDReport() const;
+  inline Buffer<uint32_t> GetHIDDescriptor() const;
 private:
   InputDevice();
   int16_t       m_channel_id;
@@ -63,7 +63,7 @@ class InputDeviceMonitor {
 public:
   InputDeviceMonitor();
   ~InputDeviceMonitor();
-  inline int Descriptor() const;
+  inline int GetFD() const;
   void ReadNext(InputDeviceAdded on_device_added, InputDeviceRemoved on_device_removed);
 public:
   std::vector<std::unique_ptr<InputDevice>> FindAll();
@@ -79,18 +79,18 @@ private:
 #endif
 
 #ifdef WITH_INPUTDEVICE_MONITOR
-inline int InputDeviceMonitor::Descriptor() const
+inline int InputDeviceMonitor::GetFD() const
 {
   return m_fd;
 }
 #endif
 
-inline int16_t InputDevice::ChannelId() const
+inline int16_t InputDevice::GetChannelId() const
 {
   return m_channel_id;
 }
 
-inline int InputDevice::Descriptor() const
+inline int InputDevice::GetFD() const
 {
   return m_fd;
 }
@@ -115,12 +115,12 @@ inline int16_t InputDevice::GetVendorId() const
   return m_vendor_id;
 }
 
-inline Buffer<uint32_t> InputDevice::GetDescriptor() const
+inline Buffer<uint32_t> InputDevice::GetHIDDescriptor() const
 {
   return Buffer<uint32_t>{ m_descriptor, m_descriptor_size };
 }
 
-inline Buffer<uint16_t> InputDevice::GetReport() const
+inline Buffer<uint16_t> InputDevice::GetHIDReport() const
 {
   return Buffer<uint16_t>{ m_input_report, m_input_report_size };
 }
