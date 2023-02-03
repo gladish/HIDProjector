@@ -52,9 +52,10 @@ int main(int argc, char *argv[])
     if (fd_is_set(read_fds, device_monitor)) {
       device_monitor.ReadNext(
         [&input_devices, &client](std::unique_ptr<InputDevice> new_device) {
-          XLOG_INFO("new device connected");
-          ProtocolWriter writer(*client);
-          writer.SendCreate(new_device);
+          if (client) {
+            ProtocolWriter writer(*client);
+            writer.SendCreate(new_device);
+          }
           input_devices.push_back(std::move(new_device));
         },
         // device disconnected
@@ -66,18 +67,22 @@ int main(int argc, char *argv[])
               return dev->GetId() == uuid;
             });
           if (old_device != std::end(input_devices)) {
-            ProtocolWriter writer(*client);
-            writer.SendDelete(*old_device);
+            if (client) {
+              ProtocolWriter writer(*client);
+              writer.SendDelete(*old_device);
+            }
             input_devices.erase(old_device);
           }
         });
     }
 
     for (std::unique_ptr<InputDevice> &dev : input_devices) {
-      if (fd_is_set(read_fds, *dev)) {
+      if (fd_is_set(read_fds, dev)) {
         dev->ReadInputReport();
-        ProtocolWriter writer(*client);
-        writer.SendInputReport(dev);
+        if (client) {
+          ProtocolWriter writer(*client);
+          writer.SendInputReport(dev);
+        }
       }
     }
   }

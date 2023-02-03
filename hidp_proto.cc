@@ -147,7 +147,7 @@ void HeaderFromNetwork(Header &header)
 }
 
 void
-ProtocolReader::ProcessIncomingClientMessage(std::vector< std::unique_ptr<InputDevice> > &local_devices)
+ProtocolReader::ProcessIncomingClientMessage(std::vector<std::unique_ptr<InputDevice>> &local_devices)
 {
   try {
     const Header header = ReadHeader();
@@ -168,6 +168,11 @@ ProtocolReader::ProcessIncomingClientMessage(std::vector< std::unique_ptr<InputD
       m_socket.Read(&req, header.PacketSize);
       req.id = le32toh(req.id);
 
+      #if 0
+      XLOG_INFO("uhid_get_report.id:%d", req.id);
+      XLOG_INFO("uhid_get_report_req.rnum:%d", req.rnum);
+      #endif
+
       char buff[256];
       buff[0] = req.rnum;
 
@@ -183,6 +188,7 @@ ProtocolReader::ProcessIncomingClientMessage(std::vector< std::unique_ptr<InputD
       res.id = htole32(req.id);
       res.err = htole16(0);
       res.size = htole16(ret);
+      memcpy(res.data, buff, ret);
 
       Header header;
       header.PacketSize = sizeof(uhid_get_report_reply_req);
