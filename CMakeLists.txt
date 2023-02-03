@@ -3,6 +3,8 @@ project(HIDProjector)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(LIBUDEV REQUIRED libudev)
 
+add_compile_options(-Wall -Wextra)
+
 if (WITH_SERVER)
   message("Building server")
   # pkg_check_modules(LIBEVDEV REQUIRED libevdev)

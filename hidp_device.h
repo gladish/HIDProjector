@@ -8,18 +8,18 @@
 #include <stdint.h>
 
 template<class T>
-struct BufferReference
+struct Buffer
 {
   const uint8_t *Data;
   T Length;
 };
 
-class ProtocolRead;
+class ProtocolReader;
 class ProtocolWriter;
 
 class InputDevice {
   friend class InputDeviceMonitor;
-  friend class ProtocolWriter;
+  friend class ProtocolReader;
 public:
   inline int16_t ChannelId() const;
   inline int Descriptor() const;
@@ -29,27 +29,26 @@ public:
   inline int16_t GetVendorId() const;
   void ReadInputReport();
   void GetName(char *buff, int count) const;
+  inline Buffer<uint16_t> GetReport() const;
+  inline Buffer<uint32_t> GetDescriptor() const;
 private:
   InputDevice();
-  inline BufferReference<int16_t> GetReport() const;
-  inline BufferReference<uint32_t> GetDescriptor() const;
-private:
   int16_t       m_channel_id;
   int           m_fd;
   char          m_name[256];
 
   // descriptor
   uint32_t      m_descriptor_size;
-  uint8_t       m_descriptor[4096];
+  uint8_t       m_descriptor[8192];
 
   // device info
-  uint32_t      m_bus_type;
+  int16_t       m_bus_type;
   int16_t       m_vendor_id;
   int16_t       m_product_id;
 
   std::string   m_uuid;
   uint8_t       m_input_report[256];
-  int16_t       m_input_report_size;
+  uint16_t      m_input_report_size;
 };
 
 #ifdef WITH_INPUTDEVICE_MONITOR
@@ -116,12 +115,12 @@ inline int16_t InputDevice::GetVendorId() const
   return m_vendor_id;
 }
 
-inline BufferReference<uint32_t> InputDevice::GetDescriptor() const
+inline Buffer<uint32_t> InputDevice::GetDescriptor() const
 {
-  return BufferReference<uint32_t>{ m_descriptor, m_descriptor_size };
+  return Buffer<uint32_t>{ m_descriptor, m_descriptor_size };
 }
 
-inline BufferReference<int16_t> InputDevice::GetReport() const
+inline Buffer<uint16_t> InputDevice::GetReport() const
 {
-  return BufferReference<int16_t>{ m_input_report, m_input_report_size };
+  return Buffer<uint16_t>{ m_input_report, m_input_report_size };
 }

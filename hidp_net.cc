@@ -56,10 +56,8 @@ namespace {
 }
 
 Socket::Socket()
+  : m_fd(-1)
 {
-  m_fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (m_fd == -1)
-    hidp_throw_errno(errno, "failed to create socket");
 }
 
 Socket::~Socket()
@@ -100,7 +98,7 @@ TcpListener::Accept()
 
   std::unique_ptr<Socket> soc{ new Socket(fd) };
   soc->SetRemoteEndpoint(remote_endpoint, remote_endpoint_length);
-  return std::move(soc);
+  return soc;
 }
 
 int Socket::Read(void *buff, int count)
@@ -128,8 +126,7 @@ int Socket::Write(const void* buff, int count)
 {
   ssize_t bytes_written = write(m_fd, buff, count);
   if (bytes_written <= 0) {
-    close(m_fd);
-    m_fd = -1;
+    Close();
     hidp_throw_errno(errno, "failed to write %d bytes", count);
   }
   return static_cast<int>(bytes_written);
@@ -145,12 +142,21 @@ void Socket::Close()
 void
 Socket::Connect(const char *addr, int port)
 {
+  if (m_fd != -1)
+    Close();
+
   XLOG_INFO("attempting connection to %s:%d", addr, port);
   ParseAddressAndPort(addr, port, m_remote_endpoint, m_remote_endpoint_length);
 
+  m_fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (m_fd == -1)
+    hidp_throw_errno(errno, "failed to create socket");
+
   int ret = connect(m_fd, reinterpret_cast<const sockaddr *>(&m_remote_endpoint), m_remote_endpoint_length);
-  if (ret == -1)
+  if (ret == -1) {
+    Close();
     hidp_throw_errno(errno, "filed to connect to %s:%d", addr, port);
+  }
 }
 
 void
@@ -183,5 +189,4 @@ void Socket::SetLocalEndpoint(const sockaddr_storage &local, socklen_t length)
 void TcpClient::Connect(const char *addr, int port)
 {
   m_socket.Connect(addr, port);
-  m_connected = true;
 }

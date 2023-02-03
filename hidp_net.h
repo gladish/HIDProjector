@@ -1,5 +1,7 @@
 #pragma once
 
+#include "hidp_common.h"
+
 #include <memory>
 #include <string>
 #include <sys/socket.h>
@@ -55,12 +57,11 @@ public:
   inline bool IsConnected() const;
 private:
   Socket            m_socket;
-  bool              m_connected;
 };
 
-inline Socket& TcpClient::GetSocket()
+inline bool TcpClient::IsConnected() const
 {
-  return m_socket;
+  return m_socket.IsConnected();
 }
 
 inline int TcpClient::Read(void *buff, int count)
@@ -78,19 +79,19 @@ inline int TcpClient::Descriptor() const
   return m_socket.Descriptor();
 }
 
-inline int TcpListener::Descriptor() const
+inline Socket& TcpClient::GetSocket()
 {
-  return m_socket.Descriptor();
-}
-
-inline bool TcpClient::IsConnected() const
-{
-  return m_socket.IsConnected();
+  return m_socket;
 }
 
 inline bool Socket::IsConnected() const
 {
-  return this->Descriptor() != -1;
+  return m_fd != -1;
+}
+
+inline int TcpListener::Descriptor() const
+{
+  return m_socket.Descriptor();
 }
 
 inline int Socket::Descriptor() const

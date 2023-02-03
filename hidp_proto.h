@@ -54,6 +54,8 @@ public:
   void ProcessIncomingServerMessage(std::vector< std::unique_ptr<InputDevice> > &local_devices);
 private:
   Header ReadHeader();
+  void ProcessCreate(Header const &header, std::vector< std::unique_ptr<InputDevice> > &local_devices);
 private:
   Socket        &m_socket;
+  char           m_read_buffer[8192];
 };

@@ -15,7 +15,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#ifdef WITH_INPUTDEVICE_MONITOR
 static int16_t NextChannelId = 1000;
+#endif
 
 InputDevice::InputDevice()
   : m_channel_id(-1)

@@ -19,12 +19,14 @@ int main(int argc, char *argv[])
   while (true) {
     while (!client.IsConnected()) {
       try {
-        client.Connect("10.0.0.233", 10020);
-        using namespace std::chrono_literals;
-        std::this_thread::sleep_for(1000ms);
+        client.Connect("10.0.0.133", 10020);
       }
       catch (const std::exception &err) {
         XLOG_INFO("errror connecting to server. %s", err.what());
+      }
+      if (!client.IsConnected()) {
+        using namespace std::chrono_literals;
+        std::this_thread::sleep_for(1000ms);
       }
     }
 
