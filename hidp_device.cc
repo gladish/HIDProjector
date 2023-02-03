@@ -56,6 +56,7 @@ InputDeviceMonitor::InputDeviceMonitor()
 {
   m_udev = udev_new();
   m_udev_monitor = udev_monitor_new_from_netlink(m_udev, "udev");
+  udev_monitor_filter_add_match_subsystem_devtype(m_udev_monitor, "hidraw", nullptr);
   udev_monitor_enable_receiving(m_udev_monitor);
   m_fd = udev_monitor_get_fd(m_udev_monitor);
 }
@@ -75,16 +76,23 @@ InputDeviceMonitor::ReadNext(InputDeviceAdded on_device_added, InputDeviceRemove
   }
 
   const char *action = udev_device_get_action(dev);
-  if (strcasecmp(action, "add") == 0) {
+  XLOG_INFO("InputDeviceMonitor triggered with action '%s'", action);
+
+  if (strcasecmp(action, "remove") == 0) {
     const char *device_node = udev_device_get_devnode(dev);
-    auto itr = m_device_ids.find(device_node);
-    if (itr != std::end(m_device_ids) && on_device_removed) {
-      on_device_removed(itr->second);
-      m_device_ids.erase(itr);
+    if (device_node) {
+      auto itr = m_device_ids.find(device_node);
+      if (itr != std::end(m_device_ids) && on_device_removed) {
+        on_device_removed(itr->second);
+        m_device_ids.erase(itr);
+      }
+    }
+    else {
+      XLOG_WARN("device  node for '%s' is NULL", udev_device_get_syspath(dev));
     }
   }
 
-  if (strcasecmp(action, "remove") == 0) {
+  if (strcasecmp(action, "add") == 0) {
     if (on_device_added) {
       std::unique_ptr<InputDevice> new_device = InputDeviceMonitor::FromDevice(dev);
       on_device_added(std::move(new_device));
@@ -96,8 +104,7 @@ InputDeviceMonitor::ReadNext(InputDeviceAdded on_device_added, InputDeviceRemove
 
 std::vector<std::unique_ptr<InputDevice>> InputDeviceMonitor::FindAll()
 {
-  std::vector<std::unique_ptr<InputDevice>> device_monitors;
-
+  std::vector<std::unique_ptr<InputDevice>> devices;
   udev_enumerate *udev_enum = udev_enumerate_new(m_udev);
   udev_enumerate_add_match_subsystem(udev_enum, "hidraw");
   udev_enumerate_scan_devices(udev_enum);
@@ -107,48 +114,54 @@ std::vector<std::unique_ptr<InputDevice>> InputDeviceMonitor::FindAll()
     const char *sysfs_path = udev_list_entry_get_name(iter);
 
     udev_device *raw_dev = udev_device_new_from_syspath(m_udev, sysfs_path);
-    device_monitors.push_back(InputDeviceMonitor::FromDevice(raw_dev));
+    std::unique_ptr<InputDevice> new_device = InputDeviceMonitor::FromDevice(raw_dev);
+    XLOG_INFO("discoverd new device (%s) at: %s", new_device->GetId().c_str(), sysfs_path);
+    devices.push_back(std::move(new_device));
     udev_device_unref(raw_dev);
   }
 
   udev_enumerate_unref(udev_enum);
-
-  return device_monitors;
+  return devices;
 }
 
 std::unique_ptr<InputDevice> InputDeviceMonitor::FromDevice(udev_device *dev)
 {
-  std::unique_ptr<InputDevice> monitor{ new InputDevice() };
+  std::unique_ptr<InputDevice> new_device{ new InputDevice() };
 
-  monitor->m_channel_id = NextChannelId++;
+  new_device->m_channel_id = NextChannelId++;
 
   const char *device_node = udev_device_get_devnode(dev);
-  monitor->m_fd = open(device_node, O_RDWR);
-  if (monitor->m_fd == -1)
+  XLOG_INFO("creating new input device from:%s", device_node);
+
+  new_device->m_fd = open(device_node, O_RDWR);
+  if (new_device->m_fd == -1)
     hidp_throw_errno(errno, "failed to open device %s", device_node);
 
   hidraw_devinfo info;
-  int ret = ioctl(monitor->m_fd, HIDIOCGRAWINFO, &info);
+  int ret = ioctl(new_device->m_fd, HIDIOCGRAWINFO, &info);
   if (ret == -1)
     hidp_throw_errno(errno, "failed to read device info");
 
-  monitor->m_bus_type = info.bustype;
-  monitor->m_vendor_id = info.vendor;
-  monitor->m_product_id = info.product;
+  new_device->m_bus_type = info.bustype;
+  new_device->m_vendor_id = info.vendor;
+  new_device->m_product_id = info.product;
 
-  ret = ioctl(monitor->m_fd, HIDIOCGRDESCSIZE, &monitor->m_descriptor_size);
+  hidraw_report_descriptor desc;
+  ret = ioctl(new_device->m_fd, HIDIOCGRDESCSIZE, &desc.size);
   if (ret == -1)
     hidp_throw_errno(errno, "failed to read descriptor size");
+  new_device->m_descriptor_size = desc.size;
 
-  ret = ioctl(monitor->m_fd, HIDIOCGRDESC, &monitor->m_descriptor); 
+  ret = ioctl(new_device->m_fd, HIDIOCGRDESC, &desc);
   if (ret == -1)
     hidp_throw_errno(errno, "failed to read descriptor");
+  memcpy(new_device->m_descriptor, desc.value, new_device->m_descriptor_size);
 
-  ret = ioctl(monitor->m_fd, HIDIOCGRAWNAME(255), &monitor->m_name);
+  ret = ioctl(new_device->m_fd, HIDIOCGRAWNAME(255), &new_device->m_name[0]);
   if (ret == -1)
     hidp_throw_errno(errno, "failed to read name");
 
-  return monitor;
+  return new_device;
 }
 #endif
 

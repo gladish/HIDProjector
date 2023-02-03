@@ -12,6 +12,19 @@
 #include <unistd.h>
 
 namespace {
+  std::string AddressToString(sockaddr_storage &endpoint, int port)
+  {
+    char buff[128];
+    inet_ntop(endpoint.ss_family, &endpoint, buff, sizeof(buff));
+    std::stringstream address_string;
+    address_string << buff;
+    if (port != -1) {
+      address_string << ":";
+      address_string << port;
+    }
+    return address_string.str();
+  }
+
   void ParseAddressAndPort(const char *addr, int port, sockaddr_storage &endpoint, socklen_t &length)
   {
     int ret;
@@ -82,6 +95,9 @@ TcpListener::Accept()
   if (fd == -1)
     hidp_throw_errno(errno, "failed to accept incoming connection");
 
+  std::string s = AddressToString(remote_endpoint, -1);
+  XLOG_INFO("accepted new connection from %s", s.c_str());
+
   std::unique_ptr<Socket> soc{ new Socket(fd) };
   soc->SetRemoteEndpoint(remote_endpoint, remote_endpoint_length);
   return std::move(soc);
@@ -94,10 +110,13 @@ int Socket::Read(void *buff, int count)
   while (bytes_read < bytes_to_read) {
     uint8_t *p = static_cast<uint8_t *>(buff);
     ssize_t n = recv(m_fd, p + bytes_read, (bytes_to_read - bytes_read), MSG_NOSIGNAL);
-    if (n == 0)
+    if (n == 0) {
+      Close();
       return -ENOTCONN;
+    }
     if (n == -1) {
       int err = errno;
+      Close();
       return -err;
     }
     bytes_read += n;
@@ -108,8 +127,11 @@ int Socket::Read(void *buff, int count)
 int Socket::Write(const void* buff, int count)
 {
   ssize_t bytes_written = write(m_fd, buff, count);
-  if (bytes_written <= 0)
+  if (bytes_written <= 0) {
+    close(m_fd);
+    m_fd = -1;
     hidp_throw_errno(errno, "failed to write %d bytes", count);
+  }
   return static_cast<int>(bytes_written);
 }
 
@@ -134,11 +156,16 @@ Socket::Connect(const char *addr, int port)
 void
 Socket::Bind(const char *addr, int port)
 {
+  XLOG_INFO("binding interface to %s:%d", addr, port);
   ParseAddressAndPort(addr, port, m_local_endpoint, m_local_endpoint_length);
+
+  int optval = 1;
+  if (setsockopt(m_fd, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)) < 0)
+    hidp_throw_errno(m_fd, "failed to set REUSEADDR");
 
   int ret = ::bind(m_fd, reinterpret_cast<const sockaddr *>(&m_local_endpoint), m_local_endpoint_length);
   if (ret == -1)
-    hidp_throw_errno(errno, "failed to bind to %s", addr);
+    hidp_throw_errno(errno, "failed to bind to %s:%d", addr, port);
 }
 
 void Socket::SetRemoteEndpoint(const sockaddr_storage &remote, socklen_t length)
@@ -157,9 +184,4 @@ void TcpClient::Connect(const char *addr, int port)
 {
   m_socket.Connect(addr, port);
   m_connected = true;
-}
-
-bool TcpClient::IsConnected() const
-{
-  return m_connected;
 }

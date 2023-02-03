@@ -19,6 +19,7 @@ public:
   void Connect(const char *addr, int port);
   void Close();
   inline int Descriptor() const;
+  inline bool IsConnected() const;
 private:
   Socket(int fd) 
     : m_fd(fd) { }
@@ -51,7 +52,7 @@ public:
   inline int Descriptor() const;
   inline Socket& GetSocket();
   void Connect(const char *addr, int port);
-  bool IsConnected() const;
+  inline bool IsConnected() const;
 private:
   Socket            m_socket;
   bool              m_connected;
@@ -77,14 +78,24 @@ inline int TcpClient::Descriptor() const
   return m_socket.Descriptor();
 }
 
-inline int Socket::Descriptor() const
-{
-  return m_fd;
-}
-
 inline int TcpListener::Descriptor() const
 {
   return m_socket.Descriptor();
+}
+
+inline bool TcpClient::IsConnected() const
+{
+  return m_socket.IsConnected();
+}
+
+inline bool Socket::IsConnected() const
+{
+  return this->Descriptor() != -1;
+}
+
+inline int Socket::Descriptor() const
+{
+  return m_fd;
 }
 
 template<class T> const T& __ref(const T& obj) { return obj; }

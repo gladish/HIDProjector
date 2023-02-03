@@ -11,9 +11,31 @@
 #include <unistd.h>
 #include <linux/uhid.h>
 
+namespace {
+  void DumpSendCreate(Header const &header, uhid_create2_req const &req)
+  {
+    XLOG_INFO("SendCreate");
+    XLOG_INFO("h.PacketSize  :%d", header.PacketSize);
+    XLOG_INFO("h.ChannelId   :%d", header.ChannelId);
+    XLOG_INFO("h.PacketType  :%d", header.PacketType);
+    XLOG_INFO("req.name      :%s", req.name);
+    XLOG_INFO("req.rd_size   :%d", req.rd_size);
+    XLOG_INFO("req.bus       :%d", req.bus);
+    XLOG_INFO("req.vendor    :%04x", req.vendor);
+    XLOG_INFO("req.product   :%04x", req.product);
+    XLOG_INFO("req.version   :%d", req.version);
+    XLOG_INFO("req.country   :%d", req.country);
+  }
+}
+
 void
 ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
 {
+  XLOG_INFO("sending create");
+
+  if (!m_socket.IsConnected())
+    return;
+
   Header header;
   header.PacketSize = sizeof(uhid_create2_req);
   header.ChannelId = dev->ChannelId();
@@ -21,14 +43,24 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   HeaderToNetwork(header);
 
   uhid_create2_req req = {};
-  req.bus = htole16(dev->GetBusType());
-  req.vendor = htole16(dev->GetVendorId());
-  req.product = htole16(dev->GetProductId());
+  req.bus = htole32(dev->GetBusType());
+  req.vendor = htole32(dev->GetVendorId());
+  req.product = htole32(dev->GetProductId());
+  const std::string id = dev->GetId();
+  memcpy(req.uniq, id.c_str(), id.size());
   dev->GetName(reinterpret_cast<char *>(req.name), sizeof(req.name));
-
   BufferReference<uint32_t> descriptor = dev->GetDescriptor();
   req.rd_size = htole32(descriptor.Length);
   memcpy(req.rd_data, descriptor.Data, descriptor.Length);
+
+  for (int i = 1; i <= req.rd_size; ++i) {
+    printf("0x%02x ", req.rd_data[i -1]);
+    if (i % 16 == 0)
+      printf("\n");
+  }
+  printf("\n");
+
+  DumpSendCreate(header, req);
 
   iovec iov[2];
   iov[0].iov_base = &header;
@@ -36,12 +68,15 @@ ProtocolWriter::SendCreate(const std::unique_ptr<InputDevice> &dev)
   iov[1].iov_base = &req;
   iov[1].iov_len = sizeof(uhid_create2_req);
 
-  Send(iov, 1);
+  Send(iov, 2);
 }
 
 void
 ProtocolWriter::SendDelete(const std::unique_ptr<InputDevice> &dev)
 {
+  if (!m_socket.IsConnected())
+    return;
+
   Header header;
   header.PacketSize = 0;
   header.ChannelId = dev->ChannelId();
@@ -58,6 +93,9 @@ ProtocolWriter::SendDelete(const std::unique_ptr<InputDevice> &dev)
 void
 ProtocolWriter::SendInputReport(const std::unique_ptr<InputDevice> &dev)
 {
+  if (!m_socket.IsConnected())
+    return;
+
   BufferReference<int16_t> report = dev->GetReport();
 
   Header header;
@@ -81,8 +119,11 @@ void
 ProtocolWriter::Send(iovec *v, int n)
 {
   ssize_t bytes_written = writev(m_socket.Descriptor(), v, n);
-  if (bytes_written < 0)
-    hidp_throw_errno(errno, "failed to write to socket");
+  if (bytes_written < 0) {
+    m_socket.Close();
+    hidp_throw_errno(errno, "writev failed");
+  }
+  XLOG_INFO("writev:%d", static_cast<int>(bytes_written));
 }
 
 void HeaderToNetwork(Header &header)
@@ -102,14 +143,22 @@ void HeaderFromNetwork(Header &header)
 void
 ProtocolReader::ProcessIncomingClientMessage()
 {
-  const Header header = ReadHeader();
-  if (header.PacketType == static_cast<int16_t>(PacketType::GetReportReq)) {
-    uhid_get_report_req req;
-    m_socket.Read(&req, header.PacketSize);
+  try {
+    const Header header = ReadHeader();
+    if (header.PacketType == static_cast<int16_t>(PacketType::GetReportReq)) {
+      uhid_get_report_req req;
+      m_socket.Read(&req, header.PacketSize);
 
-    // TODO: find the InputDevice associated with the channel
-    // do the ioctl() to get report
-    // send back to m_socket
+      XLOG_INFO("finish processing get report request");
+
+      // TODO: find the InputDevice associated with the channel
+      // do the ioctl() to get report
+      // send back to m_socket
+    }
+  }
+  catch (std::exception const &err) {
+    XLOG_WARN("failed processing incoming client message. %s", err.what());
+    return;
   }
 }
 
@@ -119,7 +168,7 @@ ProtocolReader::ReadHeader()
   Header header;
   int bytes_read = m_socket.Read(&header, sizeof(header));
   if (bytes_read < 0)
-    hidp_throw_errno(errno, "failed reading header");
+    hidp_throw_errno(-bytes_read, "failed reading header");
   HeaderFromNetwork(header);
   return header;
 }

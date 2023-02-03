@@ -23,7 +23,7 @@ class InputDevice {
 public:
   inline int16_t ChannelId() const;
   inline int Descriptor() const;
-  inline std::string Id() const;
+  inline std::string GetId() const;
   inline int16_t GetBusType() const;
   inline int16_t GetProductId() const;
   inline int16_t GetVendorId() const;
@@ -96,7 +96,7 @@ inline int InputDevice::Descriptor() const
   return m_fd;
 }
 
-inline std::string InputDevice::Id() const
+inline std::string InputDevice::GetId() const
 {
   return m_uuid;
 }
