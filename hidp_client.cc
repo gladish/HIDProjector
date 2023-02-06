@@ -14,12 +14,20 @@ int main(int argc, char *argv[])
 {
   TcpClient client;
 
+  std::string server_addr = "10.0.0.133";
+  int server_port = 10020;
+
+  if (argc > 2) {
+    server_addr = argv[1];
+    server_port = static_cast<int>(strtol(argv[2], nullptr, 10));
+  }
+
   std::vector< std::unique_ptr<InputDevice> > input_devices;
 
   while (true) {
     while (!client.IsConnected()) {
       try {
-        client.Connect("10.0.0.133", 10020);
+        client.Connect(server_addr.c_str(), server_port);
       }
       catch (const std::exception &err) {
         XLOG_INFO("errror connecting to server. %s", err.what());

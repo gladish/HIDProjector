@@ -13,7 +13,15 @@ int main(int argc, char *argv[])
 {
   InputDeviceMonitor device_monitor;
 
-  TcpListener tcp_listener("10.0.0.133", 10020);
+  std::string listen_addr = "10.0.0.133";
+  int listen_port = 10020;
+
+  if (argc > 2) {
+    listen_addr = argv[1];
+    listen_port = static_cast<int>(strtol(argv[2], nullptr, 10));
+  }
+
+  TcpListener tcp_listener(listen_addr.c_str(), listen_port);
   tcp_listener.Start();
 
   std::unique_ptr<Socket> client;
